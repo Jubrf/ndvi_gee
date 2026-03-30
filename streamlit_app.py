@@ -425,7 +425,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
             tooltip_html = (
                 f"<b>Ilot :</b> {num_ilot}<br>"
                 f"<b>NDVI A :</b> {fmt(dfc.iloc[idx]['NDVI_A'])}<br>"
-                f"<b>NDVI B :</b> {fmt(dfc.iloc[idx]['NDVI_B'])}<br>
+                f"<b>NDVI B :</b> {fmt(dfc.iloc[idx]['NDVI_B'])}<br>"
                 f"<b>Δ NDVI :</b> {fmt(delta)}<br>"
                 f"<b>Tendance :</b> {txt}"
             )
