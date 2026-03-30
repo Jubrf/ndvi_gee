@@ -373,4 +373,3 @@ else:
 
     if df1 is None and df2 is None:
         st.info("Aucune sauvegarde trouvée.")
-``
