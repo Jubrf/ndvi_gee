@@ -147,4 +147,3 @@ if uploaded:
         df.to_csv(index=False).encode(),
         "ndvi_par_parcelle_kermap.csv"
     )
-``
