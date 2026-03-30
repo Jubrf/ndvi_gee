@@ -3,51 +3,44 @@ from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import transform
 
 def shapely_to_ee(geom):
-    """
-    Convertit n'importe quel Polygon / MultiPolygon Shapely
-    en géométrie Earth Engine valide :
-    ✅ enlève les trous
-    ✅ supprime la 3ème dimension (Z)
-    ✅ découpe les multipolygones en parties valides
-    """
+    """Convertit toutes géométries Shapely → EarthEngine (Polygon/MultiPolygon)."""
 
-    # ---- 1) On vire les coordonnées Z (beaucoup de SHP en ont) ----
+    # retirer Z si présent
     def strip_z(x, y, z=None):
         return (x, y)
 
     geom2d = transform(strip_z, geom)
 
-    # ---- 2) Polygon simple ----
     if isinstance(geom2d, Polygon):
-        exterior = list(geom2d.exterior.coords)
-        return ee.Geometry.Polygon([exterior])
+        return ee.Geometry.Polygon([list(geom2d.exterior.coords)])
 
-    # ---- 3) MultiPolygon ----
     elif isinstance(geom2d, MultiPolygon):
         parts = []
         for poly in geom2d:
-            exterior = list(poly.exterior.coords)
-            parts.append([exterior])
+            parts.append([list(poly.exterior.coords)])
         return ee.Geometry.MultiPolygon(parts)
 
-    # ---- 4) Cas non géré ----
     return None
 
 
 def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
     """
-    Calcule NDVI moyen + proportion NDVI > 0.25
-    Fonction 100% compatible Polygon / MultiPolygon complexes
+    Calcule :
+      - NDVI moyen
+      - proportion NDVI > 0.25
+    Compatible Polygon / MultiPolygon
     """
 
-    # ✅ Conversion Shapely -> Earth Engine (robuste)
     geom_ee = shapely_to_ee(geom)
-
     if geom_ee is None:
         return None, None
 
-    # ✅ NDVI moyen
-    mean_dict = ndvi_img.reduceRegion(
+    # ✅ Clip obligatoire (corrige NDVI=None lorsque les dalles ne se superposent que partiellement)
+    ndvi_local = ndvi_img.clip(geom_ee)
+    veg_local = veg_mask.clip(geom_ee) if veg_mask is not None else None
+
+    # ✅ NDVI MOYEN
+    mean_dict = ndvi_local.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=geom_ee,
         scale=10,
@@ -58,12 +51,12 @@ def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
     if ndvi_mean is not None:
         ndvi_mean = float(ndvi_mean)
 
-    # ✅ Mode comparaison → pas de végétation
-    if veg_mask is None:
+    # ✅ Mode comparaison
+    if veg_local is None:
         return ndvi_mean, None
 
-    # ✅ Proportion NDVI > threshold
-    veg_dict = veg_mask.reduceRegion(
+    # ✅ Proportion NDVI > 0.25
+    veg_dict = veg_local.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=geom_ee,
         scale=10,
