@@ -278,9 +278,9 @@ st.header("🔄 Comparateur NDVI entre deux dates")
 
 
 # -------------------------
-# ✅ DATE A
+# ✅ DATE A : la plus ancienne
 # -------------------------
-st.subheader("📌 Choisir Date A")
+st.subheader("📌 Choisir Date A : la plus ancienne")
 imgA, dA = tuile_selector("A", "dateA", "available_dates_A")
 
 if imgA and dA:
@@ -290,9 +290,9 @@ if imgA and dA:
 
 
 # -------------------------
-# ✅ DATE B
+# ✅ DATE B : la plus récente
 # -------------------------
-st.subheader("📌 Choisir Date B")
+st.subheader("📌 Choisir Date B : la plus récente")
 imgB, dB = tuile_selector("B", "dateB", "available_dates_B")
 
 if imgB and dB:
