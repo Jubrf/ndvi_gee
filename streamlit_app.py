@@ -25,7 +25,6 @@ from utils.ndvi_processing import zonal_stats_ndvi
 # ✅ Formatage sécurisé des valeurs NDVI
 # ============================================================
 def fmt(v):
-    """Format NDVI ou Delta NDVI en évitant les erreurs si None."""
     try:
         return f"{float(v):.3f}"
     except:
@@ -39,7 +38,6 @@ private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
 st.title("🌱 NDVI – Analyse simple & Comparateur 2 dates (Kermap)")
-
 
 # ============================================================
 # ✅ MODULE SAUVEGARDE CSV
@@ -81,7 +79,6 @@ def load_history(filename):
     except:
         return None
 
-
 # ============================================================
 # ✅ SESSION STATE
 # ============================================================
@@ -106,10 +103,9 @@ DEFAULTS = {
     "run_comparison": False,
 }
 
-for k, v in DEFAULTS.items():
+for k,v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
-
 
 # ============================================================
 # ✅ SIDEBAR MODES
@@ -123,7 +119,6 @@ analyse_mode = st.sidebar.radio(
     ]
 )
 
-
 # ============================================================
 # ✅ UPLOAD SIG
 # ============================================================
@@ -135,16 +130,15 @@ features = load_vector(uploaded)
 st.success(f"{len(features)} parcelles chargées ✅")
 
 geoms = [f["geometry"] for f in features]
-minx = min(g.bounds[0] for g in geoms)
-miny = min(g.bounds[1] for g in geoms)
-maxx = max(g.bounds[2] for g in geoms)
-maxy = max(g.bounds[3] for g in geoms)
+minx = min([g.bounds[0] for g in geoms])
+miny = min([g.bounds[1] for g in geoms])
+maxx = max([g.bounds[2] for g in geoms])
+maxy = max([g.bounds[3] for g in geoms])
 
 aoi = ee.Geometry.Rectangle([minx,miny,maxx,maxy])
 
-
 # ============================================================
-# ✅ CLASSIFICATION NDVI & COULEURS KERMAP
+# ✅ CLASSIFICATIONS
 # ============================================================
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé","#bdbdbd")
@@ -158,11 +152,12 @@ def classify_delta(delta):
     if delta > 0.10: return ("Hausse","#1a9850")
     return ("Stable","#fee08b")
 
-def couvert_status(v):
-    if v is None: return "Indéterminé"
-    return "✅ Couvert (≥50%)" if v >= 0.5 else "❌ Non couvert (<50%)"
+def couvert_status(val):
+    if val is None:
+        return "Indéterminé"
+    return "✅ Couvert (≥50%)" if val >= 0.5 else "❌ Non couvert (<50%)"
 
-# ✅ Fonction couleur Kermap (3 classes)
+# ✅ Colorisation Kermap
 def colorize(nd):
     if nd is None:
         return "#bbbbbb"
@@ -172,12 +167,10 @@ def colorize(nd):
         return "#fee08b"
     return "#1a9850"
 
-
 # ============================================================
-# ✅ SELECTEUR DE TUILE (DERNIERE / LISTE / MOIS)
+# ✅ SELECTEUR DE TUILE
 # ============================================================
 def tuile_selector(label, dates_key):
-
     mode = st.radio(
         f"Choisir la tuile ({label})",
         ["Dernière tuile","Tuiles disponibles","Recherche par mois"],
@@ -204,10 +197,9 @@ def tuile_selector(label, dates_key):
             )
             if st.button(f"✅ Charger ({label})"):
                 return get_closest_s2_image(aoi,chosen)
-
         return None,None
 
-    # Recherche mensuelle
+    # Recherche par mois
     if mode == "Recherche par mois":
 
         year = st.selectbox(
@@ -228,7 +220,7 @@ def tuile_selector(label, dates_key):
         )
 
         start = f"{year}-{month_num}-01"
-        end = f"{year+1}-01-01" if month_num=="12" else f"{year}-{int(month_num)+1:02d}-01"
+        end   = f"{year+1}-01-01" if month_num=="12" else f"{year}-{int(month_num)+1:02d}-01"
 
         if st.button(f"📅 Rechercher ({label})"):
 
@@ -246,7 +238,7 @@ def tuile_selector(label, dates_key):
                 return None,None
 
             month_dates = sorted(
-                {datetime.datetime.utcfromtimestamp(t/1000).date()
+                {datetime.datetime.fromtimestamp(t/1000, datetime.UTC).date()
                 for t in timestamps},
                 reverse=True
             )
@@ -268,18 +260,24 @@ def tuile_selector(label, dates_key):
 
 
 # =============================================================================
-# ✅ MODE 1 — ANALYSE SIMPLE PERSISTANTE
+# ✅ MODE 1 — ANALYSE SIMPLE (avec DEBUG)
 # =============================================================================
 if analyse_mode == "Analyse simple (1 date)":
 
     st.header("🟩 Analyse NDVI – 1 Date")
 
     img, d = tuile_selector("SIMPLE","available_dates_single")
-    
+
+    # ✅ DEBUG BANDES – SÉCURISÉ (NE PLANTE PAS)
     if img is not None:
-        st.write("DEBUG bands:", img.bandNames().getInfo())
-    
-    if img and d:
+        try:
+            st.write("DEBUG bands SIMPLE :", img.bandNames().getInfo())
+        except Exception as e:
+            st.error(f"Erreur DEBUG bands : {e}")
+
+    # ✅ Calcul NDVI uniquement si image OK
+    if img is not None and d is not None:
+
         st.session_state.date_single = d
 
         ndvi = compute_ndvi(img)
@@ -308,10 +306,10 @@ if analyse_mode == "Analyse simple (1 date)":
     if st.session_state.result_single is not None:
 
         df = st.session_state.result_single
-        st.success(f"✅ Résultats NDVI — Tuile utilisée : {st.session_state.date_single}")
+        st.success(f"✅ Résultats NDVI — Tuile : {st.session_state.date_single}")
         st.dataframe(df)
 
-        # ✅ CARTE KERMAP
+        # ✅ CARTE NDVI KERMAP
         m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
         for idx, feat in enumerate(features):
@@ -319,6 +317,7 @@ if analyse_mode == "Analyse simple (1 date)":
             num_ilot = df.iloc[idx]["NUM_ILOT"]
             nd = df.iloc[idx]["NDVI_moyen"]
             classe_txt = df.iloc[idx]["Classe"]
+
             color = colorize(nd)
 
             tooltip_html = (
@@ -340,7 +339,7 @@ if analyse_mode == "Analyse simple (1 date)":
 
         st_folium(m, height=600)
 
-        # ✅ Sauvegarde
+        # ✅ SAUVEGARDE
         st.subheader("💾 Sauvegarder")
         raw_name = st.text_input("Nom de la sauvegarde :", key="save_simple")
         save_name = sanitize_name(raw_name)
@@ -359,13 +358,12 @@ if analyse_mode == "Analyse simple (1 date)":
 
 
 # =============================================================================
-# ✅ MODE 2 — COMPARAISON NDVI A ↔ B (PERSISTANTE)
+# ✅ MODE 2 — COMPARATEUR NDVI
 # =============================================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
     st.header("🟦 Comparateur NDVI – A → B")
 
-    # --- DATE A ----------------------------------
     st.subheader("📌 Date A (ancienne)")
     imgA, dA = tuile_selector("A","available_dates_A")
     if imgA and dA:
@@ -373,7 +371,6 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.dateA = dA
         st.session_state.run_A = True
 
-    # --- DATE B ----------------------------------
     st.subheader("📌 Date B (récente)")
     imgB, dB = tuile_selector("B","available_dates_B")
     if imgB and dB:
@@ -381,18 +378,14 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.dateB = dB
         st.session_state.run_B = True
 
-    # --- STATUT ----------------------------------
     st.markdown("### ✅ Statut")
-    if st.session_state.run_A:
-        st.success(f"Date A : {st.session_state.dateA}")
-    if st.session_state.run_B:
-        st.success(f"Date B : {st.session_state.dateB}")
+    if st.session_state.run_A: st.success(f"A : {st.session_state.dateA}")
+    if st.session_state.run_B: st.success(f"B : {st.session_state.dateB}")
 
     if st.session_state.run_A and st.session_state.run_B:
         if st.button("📊 Lancer comparaison"):
             st.session_state.run_comparison = True
 
-    # --- CALCUL COMPARATIF ------------------------
     if st.session_state.run_comparison:
 
         ndviA = compute_ndvi(st.session_state.imageA)
@@ -405,8 +398,8 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
             ndA,_=zonal_stats_ndvi(ndviA,None,geom)
             ndB,_=zonal_stats_ndvi(ndviB,None,geom)
-            delta=ndB-ndA if ndA is not None and ndB is not None else None
 
+            delta = ndB-ndA if ndA is not None and ndB is not None else None
             txt,col = classify_delta(delta)
 
             rows.append({
@@ -419,7 +412,6 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
         st.session_state.result_compare = pd.DataFrame(rows)
 
-    # --- AFFICHAGE PERSISTANT ----------------------
     if st.session_state.result_compare is not None:
 
         dfc = st.session_state.result_compare
@@ -455,30 +447,26 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
         st_folium(m2, height=600)
 
-        # ✅ Sauvegarde
         st.subheader("💾 Sauvegarder comparaison")
-        raw_name = st.text_input("Nom de la sauvegarde comparaison :", key="save_compare")
+        raw_name = st.text_input("Nom sauvegarde comparaison :", key="save_compare")
         save_name = sanitize_name(raw_name)
 
         if st.button("✅ Sauvegarder comparaison"):
-            if not save_name:
-                st.error("❌ Nom invalide")
-            else:
-                save_dataframe(
-                    dfc,
-                    "analyses_compare.csv",
-                    save_name,
-                    meta={
-                        "analysis_type":"comparaison",
-                        "dateA":str(st.session_state.dateA),
-                        "dateB":str(st.session_state.dateB)
-                    }
-                )
-                st.success(f"✅ Comparaison sauvegardée sous : {save_name}")
+            save_dataframe(
+                dfc,
+                "analyses_compare.csv",
+                save_name,
+                meta={
+                    "analysis_type":"comparaison",
+                    "dateA":str(st.session_state.dateA),
+                    "dateB":str(st.session_state.dateB)
+                }
+            )
+            st.success(f"✅ Comparaison sauvegardée sous : {save_name}")
 
 
 # =============================================================================
-# ✅ MODE MEMOIRE
+# ✅ MEMOIRE
 # =============================================================================
 else:
 
