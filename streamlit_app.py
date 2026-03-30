@@ -1,10 +1,10 @@
 import streamlit as st
 import folium
-import tempfile
 import pandas as pd
-import datetime
 from shapely.geometry import shape
 from streamlit_folium import st_folium
+import datetime
+import ee
 
 from utils.vector_io import load_vector
 from utils.gee_ndvi import (
@@ -16,17 +16,22 @@ from utils.gee_ndvi import (
     compute_vegetation_mask
 )
 from utils.ndvi_processing import zonal_stats_ndvi
-import ee
 
-# ------------------------------
-# INIT GEE
-# ------------------------------
+
+# -----------------------------------------------------------
+# ✅ Initialisation Earth Engine
+# -----------------------------------------------------------
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
-st.title("🌱 NDVI (GEE) — Classification Kermap + Sélection des tuiles S2")
 
+st.title("🌱 NDVI (GEE) — Classification Kermap + Sélection manuelle des tuiles")
+
+
+# -----------------------------------------------------------
+# ✅ Upload
+# -----------------------------------------------------------
 uploaded = st.file_uploader("📁 Upload SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
 
 
@@ -62,14 +67,16 @@ def colorize_kermap(ndvi):
 
 
 # -----------------------------------------------------------
-# MAIN
+# ✅ MAIN
 # -----------------------------------------------------------
 if uploaded:
 
     features = load_vector(uploaded)
     st.success(f"{len(features)} parcelles chargées ✅")
 
-    # Construire la BBOX globale
+    # ----------------------------
+    # ✅ Calcul BBOX globale
+    # ----------------------------
     all_geoms = [f["geometry"] for f in features]
     minx = min(g.bounds[0] for g in all_geoms)
     miny = min(g.bounds[1] for g in all_geoms)
@@ -78,31 +85,44 @@ if uploaded:
 
     aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
+    # ----------------------------
+    # ✅ Sélecteur de mode
+    # ----------------------------
     mode = st.radio(
-        "Choix du mode d'analyse",
+        "Choisir le mode d'analyse",
         [
-            "Dernière tuile disponible (≤ 30 jours)",
-            "Choisir parmi les tuiles disponibles"
+            "Dernière tuile disponible",
+            "Choisir une tuile parmi celles disponibles"
         ]
     )
 
     image = None
     date_used = None
 
-    # -------------------------------
-    # ✅ MODE 1 : Dernière tuile <= 30j
-    # -------------------------------
-    if mode == "Dernière tuile disponible (≤ 30 jours)":
-        st.info("🔍 Recherche dernière tuile Sentinel‑2 ≤ 30 jours…")
-        image, date_used = get_latest_s2_image(aoi)
+    # ============================================================
+    # ✅ MODE 1 : DERNIÈRE TUILE DISPONIBLE
+    # ============================================================
+    if mode == "Dernière tuile disponible":
 
-    # -------------------------------
-    # ✅ MODE 2 : Liste des tuiles disponibles
-    # -------------------------------
+        if st.button("▶️ Lancer l’analyse (dernière tuile ≤ 30 jours)"):
+
+            st.info("Recherche de la dernière tuile disponible…")
+            image, date_used = get_latest_s2_image(aoi)
+
+            if image is None:
+                st.error("❌ Aucune tuile trouvée dans les 30 derniers jours.")
+                st.stop()
+
+
+    # ============================================================
+    # ✅ MODE 2 : CHOIX MANUEL DANS LES TUILES DISPONIBLES
+    # ============================================================
     else:
-        if st.button("📅 Afficher les tuiles disponibles"):
-            st.info("Récupération des dates Sentinel‑2 disponibles…")
 
+        show_tiles = st.button("📅 Afficher les tuiles disponibles")
+
+        if show_tiles:
+            st.info("Récupération des tuiles disponibles…")
             available_dates = get_available_s2_dates(aoi, max_days=120)
 
             if len(available_dates) == 0:
@@ -110,34 +130,40 @@ if uploaded:
                 st.stop()
 
             date_choice = st.selectbox(
-                "Sélectionnez une tuile disponible",
+                "Sélectionnez une date",
                 available_dates,
                 format_func=lambda d: d.strftime("%Y-%m-%d")
             )
 
-            st.info(f"🔍 Chargement de la tuile la plus proche du {date_choice}…")
-            image, date_used = get_closest_s2_image(aoi, date_choice)
-        else:
-            st.stop()
+            if st.button("▶️ Lancer l’analyse avec cette tuile"):
+                st.info(f"Recherche de la tuile la plus proche du {date_choice}…")
+                image, date_used = get_closest_s2_image(aoi, date_choice)
 
-    # -------------------------------
-    # Vérification
-    # -------------------------------
+                if image is None:
+                    st.error("❌ Aucune tuile trouvée autour de cette date.")
+                    st.stop()
+
+        else:
+            st.stop()   # attend interaction utilisateur
+
+
+    # -----------------------------------------------------------
+    # ✅ STOP si pas d’image
+    # -----------------------------------------------------------
     if image is None:
-        st.error("❌ Aucune tuile trouvée.")
         st.stop()
 
     st.success(f"✅ Tuile utilisée : {date_used}")
 
-    # -------------------------------
-    # NDVI & Masque
-    # -------------------------------
+    # -----------------------------------------------------------
+    # ✅ Calcul NDVI & masque végétation
+    # -----------------------------------------------------------
     ndvi = compute_ndvi(image)
     veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
 
-    rows = []
-
     st.info("📊 Analyse NDVI parcelle par parcelle…")
+
+    rows = []
 
     for i, feat in enumerate(features):
         geom = feat["geometry"]
@@ -164,11 +190,14 @@ if uploaded:
     st.dataframe(df)
 
     # -----------------------------------------------------------
-    # ✅ Carte NDVI Kermap
+    # ✅ Carte NDVI
     # -----------------------------------------------------------
     st.subheader("🗺️ Carte NDVI — Classification Kermap")
 
-    m = folium.Map(location=[(miny + maxy)/2, (minx + maxx)/2], zoom_start=14)
+    m = folium.Map(
+        location=[(miny + maxy)/2, (minx + maxx)/2],
+        zoom_start=14
+    )
 
     for i, feat in enumerate(features):
         geom = feat["geometry"]
