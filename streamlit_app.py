@@ -19,19 +19,14 @@ from utils.ndvi_processing import zonal_stats_ndvi
 
 
 # -----------------------------------------------------------
-# ✅ Initialisation Earth Engine
+# ✅ INITIALISATION GEE
 # -----------------------------------------------------------
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
-
 st.title("🌱 NDVI (GEE) — Classification Kermap + Sélection manuelle des tuiles")
 
-
-# -----------------------------------------------------------
-# ✅ Upload
-# -----------------------------------------------------------
 uploaded = st.file_uploader("📁 Upload SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
 
 
@@ -67,6 +62,19 @@ def colorize_kermap(ndvi):
 
 
 # -----------------------------------------------------------
+# ✅ SESSION STATE (évite la perte de sélection)
+# -----------------------------------------------------------
+if "available_dates" not in st.session_state:
+    st.session_state.available_dates = None
+
+if "selected_date" not in st.session_state:
+    st.session_state.selected_date = None
+
+if "run_analysis" not in st.session_state:
+    st.session_state.run_analysis = False
+
+
+# -----------------------------------------------------------
 # ✅ MAIN
 # -----------------------------------------------------------
 if uploaded:
@@ -74,9 +82,7 @@ if uploaded:
     features = load_vector(uploaded)
     st.success(f"{len(features)} parcelles chargées ✅")
 
-    # ----------------------------
-    # ✅ Calcul BBOX globale
-    # ----------------------------
+    # BBOX globale
     all_geoms = [f["geometry"] for f in features]
     minx = min(g.bounds[0] for g in all_geoms)
     miny = min(g.bounds[1] for g in all_geoms)
@@ -85,9 +91,9 @@ if uploaded:
 
     aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
-    # ----------------------------
-    # ✅ Sélecteur de mode
-    # ----------------------------
+    # ----------------------
+    # ✅ Choix du mode
+    # ----------------------
     mode = st.radio(
         "Choisir le mode d'analyse",
         [
@@ -96,17 +102,14 @@ if uploaded:
         ]
     )
 
-    image = None
-    date_used = None
 
-    # ============================================================
-    # ✅ MODE 1 : DERNIÈRE TUILE DISPONIBLE
-    # ============================================================
+    # ===============================================================
+    # ✅ MODE : DERNIÈRE TUILE DISPONIBLE
+    # ===============================================================
     if mode == "Dernière tuile disponible":
 
         if st.button("▶️ Lancer l’analyse (dernière tuile ≤ 30 jours)"):
-
-            st.info("Recherche de la dernière tuile disponible…")
+            st.session_state.run_analysis = True
             image, date_used = get_latest_s2_image(aoi)
 
             if image is None:
@@ -114,50 +117,47 @@ if uploaded:
                 st.stop()
 
 
-    # ============================================================
-    # ✅ MODE 2 : CHOIX MANUEL DANS LES TUILES DISPONIBLES
-    # ============================================================
+    # ===============================================================
+    # ✅ MODE : TUILE CHOISIE PARMI CELLES DISPONIBLES
+    # ===============================================================
     else:
 
-        show_tiles = st.button("📅 Afficher les tuiles disponibles")
+        if st.button("📅 Afficher les tuiles disponibles"):
+            st.info("Récupération des dates Sentinel‑2…")
+            st.session_state.available_dates = get_available_s2_dates(aoi, max_days=120)
 
-        if show_tiles:
-            st.info("Récupération des tuiles disponibles…")
-            available_dates = get_available_s2_dates(aoi, max_days=120)
+        # afficher la liste si déjà récupérée
+        if st.session_state.available_dates:
 
-            if len(available_dates) == 0:
-                st.error("Aucune tuile disponible dans les 120 derniers jours.")
-                st.stop()
-
-            date_choice = st.selectbox(
+            st.session_state.selected_date = st.selectbox(
                 "Sélectionnez une date",
-                available_dates,
+                st.session_state.available_dates,
                 format_func=lambda d: d.strftime("%Y-%m-%d")
             )
 
             if st.button("▶️ Lancer l’analyse avec cette tuile"):
-                st.info(f"Recherche de la tuile la plus proche du {date_choice}…")
-                image, date_used = get_closest_s2_image(aoi, date_choice)
+                st.session_state.run_analysis = True
+                image, date_used = get_closest_s2_image(aoi, st.session_state.selected_date)
 
                 if image is None:
                     st.error("❌ Aucune tuile trouvée autour de cette date.")
                     st.stop()
-
         else:
-            st.stop()   # attend interaction utilisateur
+            st.stop()
 
 
     # -----------------------------------------------------------
-    # ✅ STOP si pas d’image
+    # ✅ STOP si RUN non cliqué
     # -----------------------------------------------------------
-    if image is None:
+    if not st.session_state.run_analysis:
         st.stop()
 
-    st.success(f"✅ Tuile utilisée : {date_used}")
 
     # -----------------------------------------------------------
-    # ✅ Calcul NDVI & masque végétation
+    # ✅ Vérification & Calcul NDVI
     # -----------------------------------------------------------
+    st.success(f"✅ Tuile utilisée : {date_used}")
+
     ndvi = compute_ndvi(image)
     veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
 
@@ -211,7 +211,10 @@ if uploaded:
                 "weight": 1,
                 "fillOpacity": 0.7
             },
-            tooltip=f"{df.iloc[i]['NUM_ILOT']} — NDVI={ndvi_val:.2f} — {df.iloc[i]['Classe']}"
+            tooltip=(
+                f"{df.iloc[i]['NUM_ILOT']} — NDVI={ndvi_val:.2f} — "
+                f"{df.iloc[i]['Classe']} — {df.iloc[i]['Couvert']}"
+            )
         ).add_to(m)
 
     st_folium(m, height=600)
