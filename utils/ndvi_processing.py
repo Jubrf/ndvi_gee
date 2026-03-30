@@ -3,20 +3,16 @@ import ee
 def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
     """
     Calcule :
-    - NDVI moyen sur la parcelle
-    - proportion de pixels NDVI > seuil (uniquement si veg_mask != None)
-
-    Paramètres :
-    - ndvi_img : ee.Image NDVI
-    - veg_mask : ee.Image booléenne (NDVI > 0.25) ou None en mode comparaison
-    - geom : géométrie shapely de la parcelle
+    - NDVI moyen de la parcelle
+    - proportion NDVI > seuil (uniquement si veg_mask != None)
+    Fonction compatible Analyse simple et Comparaison NDVI.
     """
 
-    # Convertir géométrie shapely → géométrie Earth Engine
+    # Convertir géométrie shapely → Earth Engine
     geom_ee = ee.Geometry.Polygon(list(geom.exterior.coords))
 
     # -------------------------------------------------------
-    # ✅ Calcul NDVI moyen (toujours exécuté)
+    # ✅ NDVI MOYEN (toujours calculé)
     # -------------------------------------------------------
     mean_dict = ndvi_img.reduceRegion(
         reducer=ee.Reducer.mean(),
@@ -30,14 +26,13 @@ def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
         ndvi_mean = float(ndvi_mean)
 
     # -------------------------------------------------------
-    # ✅ CAS 1 : veg_mask = None → mode comparaison
-    #   → on renvoie NDVI moyen et pas de proportion
+    # ✅ MODE COMPARATEUR : veg_mask = None
     # -------------------------------------------------------
     if veg_mask is None:
         return ndvi_mean, None
 
     # -------------------------------------------------------
-    # ✅ CAS 2 : veg_mask fourni → calcul proportion NDVI>seuil
+    # ✅ MODE ANALYSE SIMPLE : calcul proportion NDVI > 0.25
     # -------------------------------------------------------
     veg_dict = veg_mask.reduceRegion(
         reducer=ee.Reducer.mean(),
