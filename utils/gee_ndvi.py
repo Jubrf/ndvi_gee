@@ -9,17 +9,31 @@ def init_gee(service_account, private_key):
     ee.Initialize(credentials)
 
 
-# ----------------------------------------------------------
-# ✅ NDVI
-# ----------------------------------------------------------
 def compute_ndvi(img):
-    """Retourne une image NDVI Sentinel‑2"""
-    return img.normalizedDifference(["B8", "B4"]).rename("NDVI")
+    """
+    Calcule un NDVI robuste sur S2_SR en détectant automatiquement les bandes RED et NIR.
+    Fonctionne même si les bandes s'appellent B4, B04, B4_1, B8, B08, B8A, etc.
+    """
 
+    # Récupération des noms de bandes disponibles
+    bands = img.bandNames().getInfo()
 
-def compute_vegetation_mask(ndvi_img, threshold=0.25):
-    """Masque végétation NDVI > threshold"""
-    return ndvi_img.gt(threshold).rename("VEG")
+    # Liste des noms possibles pour les bandes S2
+    red_candidates = ["B4", "B04", "B4_1"]
+    nir_candidates = ["B8", "B08", "B8A", "B8_1"]
+
+    # Trouver une bande valable dans les tuiles
+    red = next((b for b in red_candidates if b in bands), None)
+    nir = next((b for b in nir_candidates if b in bands), None)
+
+    if red is None or nir is None:
+        # Si rien n'est trouvé → NDVI = None partout (évite crash)
+        return ee.Image.constant(0).rename("NDVI").updateMask(ee.Image.constant(0))
+
+    # NDVI Sentinel‑2
+    ndvi = img.normalizedDifference([nir, red]).rename("NDVI")
+
+    return ndvi
 
 
 # ----------------------------------------------------------
