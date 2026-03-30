@@ -275,10 +275,9 @@ if analyse_mode == "Analyse simple (1 date)":
     st.header("🟩 Analyse NDVI – 1 Date")
 
     img, d = tuile_selector("SIMPLE","available_dates_single")
-    
-if img is not None:
+    if img is not None:
     st.write("DEBUG bands:", img.bandNames().getInfo())
-
+    
     if img and d:
         st.session_state.date_single = d
 
