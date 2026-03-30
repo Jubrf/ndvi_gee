@@ -1,6 +1,8 @@
 import streamlit as st
 import folium
+import tempfile
 import pandas as pd
+import datetime
 from shapely.geometry import shape
 from streamlit_folium import st_folium
 
@@ -13,20 +15,54 @@ import ee
 # INIT GEE
 # ------------------------------
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
-private_key     = st.secrets["GEE_PRIVATE_KEY"]
-
+private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
-st.title("🌱 NDVI Google Earth Engine — Parcelle par parcelle (30 jours max)")
+st.title("🌱 NDVI (GEE) — Classification type Kermap + Couverture ≥ 50 %")
 
 uploaded = st.file_uploader("📁 Upload SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
 
+
+# -----------------------------------------------------------
+# ✅ Classification type Kermap
+# -----------------------------------------------------------
+def classify_ndvi(ndvi):
+    if ndvi is None:
+        return ("Indéterminé", "#bdbdbd")  # gris
+    if ndvi < 0.25:
+        return ("Sol nu", "#d73027")  # rouge
+    elif ndvi < 0.50:
+        return ("Végétation faible", "#fee08b")  # jaune
+    else:
+        return ("Végétation dense", "#1a9850")  # vert
+
+
+def couvert_status(veg_prop):
+    if veg_prop is None:
+        return "Indéterminé"
+    return "✅ Couvert (≥ 50%)" if veg_prop >= 0.5 else "❌ Non couvert (< 50%)"
+
+
+def colorize_kermap(ndvi):
+    if ndvi is None:
+        return "#bdbdbd"
+    if ndvi < 0.25:
+        return "#d73027"  # rouge
+    elif ndvi < 0.50:
+        return "#fee08b"  # jaune
+    else:
+        return "#1a9850"  # vert
+
+
+# -----------------------------------------------------------
+# MAIN
+# -----------------------------------------------------------
 if uploaded:
 
     features = load_vector(uploaded)
     st.success(f"{len(features)} parcelles chargées ✅")
 
-    # Construire BBOX globale
+    # Construire la BBOX globale
     all_geoms = [f["geometry"] for f in features]
     minx = min(g.bounds[0] for g in all_geoms)
     miny = min(g.bounds[1] for g in all_geoms)
@@ -35,81 +71,80 @@ if uploaded:
 
     aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
-    # Trouver la tuile la plus récente
-    st.info("🔍 Recherche de la tuile Sentinel‑2 la plus récente (≤ 30 jours)…")
+    # ✅ Recherche tuile la plus récente ≤ 30 jours
+    st.info("🔍 Recherche dernière tuile Sentinel‑2 ≤ 30 jours…")
     image, date_used = get_latest_s2_image(aoi)
 
     if image is None:
-        st.error("❌ Aucune tuile S2 trouvée ces 30 derniers jours.")
+        st.error("❌ Aucune tuile trouvée ces 30 derniers jours.")
         st.stop()
 
-    st.success(f"✅ Tuile trouvée du {date_used}")
+    st.success(f"✅ Tuile trouvée : {date_used}")
 
-    # NDVI global
+    # ✅ NDVI + masque végétation (NDVI > 0.25)
     ndvi = compute_ndvi(image)
-    veg_mask = compute_vegetation_mask(ndvi, threshold=0.3)
+    veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
 
-    # Zonal stats por parcelle
+    # Analyse par parcelle
     rows = []
 
+    st.info("📊 Analyse NDVI parcelle par parcelle…")
+
     for i, feat in enumerate(features):
+
         geom = feat["geometry"]
         props = feat["properties"]
-
         num_ilot = props.get("NUM_ILOT", f"ILOT_{i+1}")
 
         ndvi_mean, veg_prop = zonal_stats_ndvi(ndvi, veg_mask, geom)
 
-        if veg_prop is not None:
-            couvert = "✅ Oui" if veg_prop >= 0.5 else "❌ Non"
-        else:
-            couvert = "❓ Indéterminé"
+        classe_txt, classe_color = classify_ndvi(ndvi_mean)
+        couvert = couvert_status(veg_prop)
 
         rows.append({
             "NUM_ILOT": num_ilot,
             "NDVI_moyen": ndvi_mean,
+            "Classe": classe_txt,
             "Proportion_couvert": veg_prop,
-            "Couvert_≥50%": couvert,
+            "Couvert": couvert,
             "Date": str(date_used)
         })
 
     df = pd.DataFrame(rows)
 
-    st.subheader("📊 Résultats NDVI par parcelle")
+    st.subheader("📋 Résultats NDVI par parcelle")
     st.dataframe(df)
 
-    # Carte NDVI
-    st.subheader("🗺️ Carte NDVI — palette Kermap")
+    # -----------------------------------------------------------
+    # ✅ Carte NDVI type Kermap
+    # -----------------------------------------------------------
+    st.subheader("🗺️ Carte NDVI — Classification type Kermap")
 
-    m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
-
-    def colorize(v):
-        if v is None: return "#bbbbbb"
-        vv = (v+1)/2
-        if vv < 0.33: return "#d73027"
-        if vv < 0.66: return "#fee08b"
-        return "#1a9850"
+    m = folium.Map(location=[(miny + maxy)/2, (minx + maxx)/2], zoom_start=14)
 
     for i, feat in enumerate(features):
         geom = feat["geometry"]
-        ndvi_mean = df.iloc[i]["NDVI_moyen"]
+        ndvi_val = df.iloc[i]["NDVI_moyen"]
 
         folium.GeoJson(
             geom.__geo_interface__,
-            style_function=lambda x, ndvi=ndvi_mean: {
-                "fillColor": colorize(ndvi),
+            style_function=lambda x, ndvi=ndvi_val: {
+                "fillColor": colorize_kermap(ndvi),
                 "color": "black",
                 "weight": 1,
                 "fillOpacity": 0.7
             },
-            tooltip=f"{df.iloc[i]['NUM_ILOT']} — NDVI={ndvi_mean}"
+            tooltip=f"{df.iloc[i]['NUM_ILOT']} — NDVI={ndvi_val:.2f} — {df.iloc[i]['Classe']}"
         ).add_to(m)
 
     st_folium(m, height=600)
 
-    # Export CSV
+    # -----------------------------------------------------------
+    # ✅ Export CSV
+    # -----------------------------------------------------------
     st.download_button(
-        "📥 Exporter CSV",
+        "📥 Télécharger CSV",
         df.to_csv(index=False).encode(),
-        "ndvi_par_parcelle_gee.csv"
+        "ndvi_par_parcelle_kermap.csv"
     )
+``
