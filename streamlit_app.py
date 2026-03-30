@@ -433,3 +433,62 @@ elif analyse_mode == "Comparaison entre 2 dates":
         # CARTE ΔNDVI
         m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
+        for i, feat in enumerate(features):
+            geom = feat["geometry"]
+            delta = dfc.iloc[i]["Delta_NDVI"]
+            _, col = classify_delta(delta)
+
+            folium.GeoJson(
+                geom.__geo_interface__,
+                style_function=lambda x, c=col: {
+                    "fillColor": c, "color": "black",
+                    "weight": 1, "fillOpacity": 0.7
+                },
+                tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
+            ).add_to(m2)
+
+        add_legend_delta(m2)
+        st_folium(m2, height=600)
+
+        st.subheader("💾 Sauvegarder cette comparaison")
+
+        save_name = st.text_input("Nom de la sauvegarde", key="save_compare")
+
+        if st.button("💾 Sauvegarder comparaison"):
+            if not save_name:
+                st.error("Veuillez fournir un nom")
+            else:
+                save_dataframe(
+                    dfc,
+                    "analyses_compare.csv",
+                    save_name,
+                    meta={
+                        "analysis_type": "comparaison",
+                        "dateA": str(st.session_state.dateA),
+                        "dateB": str(st.session_state.dateB)
+                    }
+                )
+                st.success("✅ Comparaison sauvegardée.")
+
+
+# ========================================================
+# ✅ MODE 3 : MEMOIRE
+# ========================================================
+else:
+
+    st.header("📚 Mémoire des analyses sauvegardées")
+
+    df1 = load_history("analyses_simple.csv")
+    df2 = load_history("analyses_compare.csv")
+
+    if df1 is not None:
+        st.subheader("🗂️ Analyses simples")
+        st.dataframe(df1)
+    else:
+        st.info("Aucune analyse simple sauvegardée.")
+
+    if df2 is not None:
+        st.subheader("🗂️ Comparaisons NDVI")
+        st.dataframe(df2)
+    else:
+        st.info("Aucune comparaison sauvegardée.")
