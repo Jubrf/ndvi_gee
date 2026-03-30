@@ -3,7 +3,6 @@ import folium
 import pandas as pd
 from shapely.geometry import shape
 from streamlit_folium import st_folium
-from branca.element import Template, MacroElement
 import datetime
 import ee
 import os
@@ -124,7 +123,7 @@ aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
 
 # ========================================================
-# ✅ CLASSES NDVI
+# ✅ CLASSIFICATIONS
 # ========================================================
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé", "#bdbdbd")
@@ -138,65 +137,11 @@ def classify_delta(delta):
     if delta > 0.10: return ("Hausse", "#1a9850")
     return ("Stable", "#fee08b")
 
-def couvert_status(v):
-    if v is None:
+def couvert_status(p):
+    if p is None:
         return "Indéterminé"
-    return "✅ Couvert (≥50%)" if v >= 0.5 else "❌ Non couvert (<50%)"
+    return "✅ Couvert (≥50%)" if p >= 0.5 else "❌ Non couvert (<50%)"
 
-
-# ========================================================
-# ✅ LÉGENDES FOLIUM — VERSION SÉCURISÉE
-# ========================================================
-from folium import Element
-
-def add_legend_ndvi(m):
-    if m is None:
-        return
-
-    legend_html = """
-    <div style="
-        position: fixed;
-        bottom: 40px;
-        right: 10px;
-        z-index: 9999;
-        background-color: rgba(255,255,255,0.9);
-        padding: 10px;
-        border: 1px solid #999;
-        border-radius: 5px;
-        font-size: 14px;">
-        <b>Légende NDVI</b><br>
-        <i style='background:#d73027;width:12px;height:12px;display:inline-block;'></i> Sol nu<br>
-        <i style='background:#fee08b;width:12px;height:12px;display:inline-block;'></i> Végétation faible<br>
-        <i style='background:#1a9850;width:12px;height:12px;display:inline-block;'></i> Végétation dense
-    </div>
-    """
-
-    m.get_root().html.add_child(Element(legend_html))
-
-
-def add_legend_delta(m):
-    if m is None:
-        return
-
-    legend_html = """
-    <div style="
-        position: fixed;
-        bottom: 40px;
-        right: 10px;
-        z-index: 9999;
-        background-color: rgba(255,255,255,0.9);
-        padding: 10px;
-        border: 1px solid #999;
-        border-radius: 5px;
-        font-size: 14px;">
-        <b>Légende ΔNDVI</b><br>
-        <i style='background:#d73027;width:12px;height:12px;display:inline-block;'></i> Baisse<br>
-        <i style='background:#fee08b;width:12px;height:12px;display:inline-block;'></i> Stable<br>
-        <i style='background:#1a9850;width:12px;height:12px;display:inline-block;'></i> Hausse
-    </div>
-    """
-
-    m.get_root().html.add_child(Element(legend_html))
 
 # ========================================================
 # ✅ SELECTEUR DE TUILE
@@ -209,14 +154,19 @@ def tuile_selector(label, dates_key):
         key=f"mode_{label}"
     )
 
-    # Dernière tuile
+    # ----------------------------
+    # ✅ DERNIERE TUILE
+    # ----------------------------
     if mode == "Dernière tuile":
         if st.button(f"▶️ Charger dernière tuile ({label})"):
             return get_latest_s2_image(aoi)
         return None, None
 
-    # Liste tuiles
+    # ----------------------------
+    # ✅ TUILES DISPONIBLES
+    # ----------------------------
     if mode == "Tuiles disponibles":
+
         if st.button(f"📅 Lister tuiles ({label})"):
             st.session_state[dates_key] = get_available_s2_dates(aoi, 120)
 
@@ -234,7 +184,9 @@ def tuile_selector(label, dates_key):
 
         return None, None
 
-    # Recherche par mois
+    # ----------------------------
+    # ✅ RECHERCHE PAR MOIS
+    # ----------------------------
     if mode == "Recherche par mois":
 
         year = st.selectbox(
@@ -255,21 +207,24 @@ def tuile_selector(label, dates_key):
         )
 
         start = f"{year}-{month_num}-01"
-        end = f"{year+1}-01-01" if month_num=="12" else f"{year}-{int(month_num)+1:02d}-01"
+        end = f"{year+1}-01-01" if month_num == "12" else f"{year}-{int(month_num)+1:02d}-01"
 
         if st.button(f"📅 Lister tuiles du mois ({label})"):
+
             col = (ee.ImageCollection("COPERNICUS/S2_SR")
-                   .filterBounds(aoi)
-                   .filterDate(start, end)
-                   .sort("system:time_start", False))
+                  .filterBounds(aoi)
+                  .filterDate(start, end)
+                  .sort("system:time_start", False))
+
             timestamps = col.aggregate_array("system:time_start").getInfo()
 
             if not timestamps:
-                st.error("❌ Aucune tuile trouvée ce mois.")
+                st.error("❌ Aucune tuile ce mois.")
                 return None, None
 
             month_dates = sorted(
-                {datetime.datetime.utcfromtimestamp(t/1000).date() for t in timestamps},
+                {datetime.datetime.utcfromtimestamp(t/1000).date()
+                for t in timestamps},
                 reverse=True
             )
 
@@ -290,7 +245,7 @@ def tuile_selector(label, dates_key):
 
 
 # ========================================================
-# ✅ MODE 1 : ANALYSE SIMPLE
+# ✅ MODE 1 — ANALYSE SIMPLE
 # ========================================================
 if analyse_mode == "Analyse simple (1 date)":
 
@@ -326,6 +281,7 @@ if analyse_mode == "Analyse simple (1 date)":
         df = pd.DataFrame(rows)
         st.dataframe(df)
 
+        # CARTE NDVI
         m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
         for i, feat in enumerate(features):
@@ -342,9 +298,9 @@ if analyse_mode == "Analyse simple (1 date)":
                 tooltip=f"{df.iloc[i]['NUM_ILOT']} — NDVI={nd:.2f}"
             ).add_to(m)
 
-        add_legend_ndvi(m)
         st_folium(m, height=600)
 
+        # Sauvegarde
         st.subheader("💾 Sauvegarder cette analyse")
 
         save_name = st.text_input("Nom de la sauvegarde", key="save_simple")
@@ -363,13 +319,13 @@ if analyse_mode == "Analyse simple (1 date)":
 
 
 # ========================================================
-# ✅ MODE 2 : COMPARATEUR 2 DATES
+# ✅ MODE 2 — COMPARAISON 2 DATES
 # ========================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
     st.header("🟦 Comparateur NDVI – Deux dates")
 
-    # DATE A
+    # Sélection Date A
     st.subheader("📌 Date A (ancienne)")
     imgA, dA = tuile_selector("A", "available_dates_A")
 
@@ -378,7 +334,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.dateA = dA
         st.session_state.run_A = True
 
-    # DATE B
+    # Sélection Date B
     st.subheader("📌 Date B (récente)")
     imgB, dB = tuile_selector("B", "available_dates_B")
 
@@ -387,22 +343,25 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.dateB = dB
         st.session_state.run_B = True
 
+    # Affichage statut
     st.markdown("### ✅ Statut sélection")
 
     if st.session_state.run_A:
-        st.success(f"Date A chargée : {st.session_state.dateA}")
+        st.success(f"Date A : {st.session_state.dateA}")
     else:
         st.info("Date A non définie")
 
     if st.session_state.run_B:
-        st.success(f"Date B chargée : {st.session_state.dateB}")
+        st.success(f"Date B : {st.session_state.dateB}")
     else:
         st.info("Date B non définie")
 
+    # Lancer comparaison
     if st.session_state.run_A and st.session_state.run_B:
         if st.button("📊 Comparer NDVI A ↔ B"):
             st.session_state.run_comparison = True
 
+    # Résultat comparaison
     if st.session_state.run_comparison:
 
         st.success(f"Comparaison : {st.session_state.dateA} → {st.session_state.dateB}")
@@ -433,26 +392,26 @@ elif analyse_mode == "Comparaison entre 2 dates":
         dfc = pd.DataFrame(rows)
         st.dataframe(dfc)
 
-        # CARTE ΔNDVI
+        # Carte ΔNDVI
         m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
         for i, feat in enumerate(features):
             geom = feat["geometry"]
             delta = dfc.iloc[i]["Delta_NDVI"]
-            _, col = classify_delta(delta)
+            _, color = classify_delta(delta)
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, c=col: {
+                style_function=lambda x, c=color: {
                     "fillColor": c, "color": "black",
                     "weight": 1, "fillOpacity": 0.7
                 },
                 tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
             ).add_to(m2)
 
-        add_legend_delta(m2)
         st_folium(m2, height=600)
 
+        # Sauvegarde comparaison
         st.subheader("💾 Sauvegarder cette comparaison")
 
         save_name = st.text_input("Nom de la sauvegarde", key="save_compare")
@@ -475,7 +434,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
 
 # ========================================================
-# ✅ MODE 3 : MEMOIRE
+# ✅ MODE MEMOIRE
 # ========================================================
 else:
 
