@@ -7,9 +7,9 @@ import datetime
 import ee
 import os
 
-# ========================================================
+# ============================================================
 # ✅ IMPORTS UTILS
-# ========================================================
+# ============================================================
 from utils.vector_io import load_vector
 from utils.gee_ndvi import (
     init_gee,
@@ -21,20 +21,18 @@ from utils.gee_ndvi import (
 )
 from utils.ndvi_processing import zonal_stats_ndvi
 
-
-# ========================================================
-# ✅ INIT GEE
-# ========================================================
+# ============================================================
+# ✅ INIT EARTH ENGINE
+# ============================================================
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
 st.title("🌱 NDVI – Analyse simple & Comparateur NDVI (2 dates)")
 
-
-# ========================================================
-# ✅ MODULE SAUVEGARDE CSV
-# ========================================================
+# ============================================================
+# ✅ MODULE DE SAUVEGARDE
+# ============================================================
 def ensure_history_dir():
     if not os.path.exists("history"):
         os.makedirs("history")
@@ -61,10 +59,9 @@ def load_history(filename):
         return pd.read_csv(path)
     return None
 
-
-# ========================================================
+# ============================================================
 # ✅ SESSION STATE
-# ========================================================
+# ============================================================
 DEFAULTS = {
     "available_dates_single": None,
     "available_dates_A": None,
@@ -88,10 +85,9 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-
-# ========================================================
-# ✅ SIDEBAR MODES
-# ========================================================
+# ============================================================
+# ✅ SIDEBAR
+# ============================================================
 analyse_mode = st.sidebar.radio(
     "Mode d'analyse",
     [
@@ -101,12 +97,10 @@ analyse_mode = st.sidebar.radio(
     ]
 )
 
-
-# ========================================================
+# ============================================================
 # ✅ UPLOAD SIG
-# ========================================================
+# ============================================================
 uploaded = st.file_uploader("📁 Charger un SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
-
 if not uploaded:
     st.stop()
 
@@ -114,57 +108,56 @@ features = load_vector(uploaded)
 st.success(f"{len(features)} parcelles chargées ✅")
 
 geoms = [f["geometry"] for f in features]
-minx = min(g.bounds[0] for g in geoms)
-miny = min(g.bounds[1] for g in geoms)
-maxx = max(g.bounds[2] for g in geoms)
-maxy = max(g.bounds[3] for g in geoms)
+minx = min([g.bounds[0] for g in geoms])
+miny = min([g.bounds[1] for g in geoms])
+maxx = max([g.bounds[2] for g in geoms])
+maxy = max([g.bounds[3] for g in geoms])
 
 aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
-
-# ========================================================
+# ============================================================
 # ✅ CLASSIFICATIONS
-# ========================================================
+# ============================================================
 def classify_ndvi(nd):
-    if nd is None: return ("Indéterminé", "#bdbdbd")
-    if nd < 0.25: return ("Sol nu", "#d73027")
-    if nd < 0.50: return ("Végétation faible", "#fee08b")
+    if nd is None:
+        return ("Indéterminé", "#bdbdbd")
+    if nd < 0.25:
+        return ("Sol nu", "#d73027")
+    if nd < 0.50:
+        return ("Végétation faible", "#fee08b")
     return ("Végétation dense", "#1a9850")
 
-def classify_delta(delta):
-    if delta is None: return ("Indéterminé", "#bdbdbd")
-    if delta < -0.10: return ("Baisse", "#d73027")
-    if delta > 0.10: return ("Hausse", "#1a9850")
+def classify_delta(d):
+    if d is None: 
+        return ("Indéterminé", "#bdbdbd")
+    if d < -0.10:
+        return ("Baisse", "#d73027")
+    if d > 0.10:
+        return ("Hausse", "#1a9850")
     return ("Stable", "#fee08b")
 
-def couvert_status(p):
-    if p is None:
+def couvert_status(v):
+    if v is None:
         return "Indéterminé"
-    return "✅ Couvert (≥50%)" if p >= 0.5 else "❌ Non couvert (<50%)"
+    return "✅ Couvert (≥50%)" if v >= 0.5 else "❌ Non couvert (<50%)"
 
-
-# ========================================================
+# ============================================================
 # ✅ SELECTEUR DE TUILE
-# ========================================================
+# ============================================================
 def tuile_selector(label, dates_key):
-
     mode = st.radio(
         f"Choisir la tuile ({label})",
         ["Dernière tuile", "Tuiles disponibles", "Recherche par mois"],
         key=f"mode_{label}"
     )
 
-    # ----------------------------
-    # ✅ DERNIERE TUILE
-    # ----------------------------
+    # Dernière tuile
     if mode == "Dernière tuile":
         if st.button(f"▶️ Charger dernière tuile ({label})"):
             return get_latest_s2_image(aoi)
         return None, None
 
-    # ----------------------------
-    # ✅ TUILES DISPONIBLES
-    # ----------------------------
+    # Tuiles disponibles
     if mode == "Tuiles disponibles":
 
         if st.button(f"📅 Lister tuiles ({label})"):
@@ -173,10 +166,10 @@ def tuile_selector(label, dates_key):
         if st.session_state.get(dates_key):
 
             chosen = st.selectbox(
-                f"Dates disponibles ({label})",
+                f"Dates ({label})",
                 st.session_state[dates_key],
                 key=f"sel_{label}",
-                format_func=lambda d: d.strftime("%Y-%m-%d")
+                format_func=lambda x: x.strftime("%Y-%m-%d")
             )
 
             if st.button(f"▶️ Charger cette date ({label})"):
@@ -184,14 +177,12 @@ def tuile_selector(label, dates_key):
 
         return None, None
 
-    # ----------------------------
-    # ✅ RECHERCHE PAR MOIS
-    # ----------------------------
+    # Recherche par mois
     if mode == "Recherche par mois":
 
         year = st.selectbox(
             f"Année ({label})",
-            list(range(2017, datetime.date.today().year + 1))[::-1],
+            list(range(2017, datetime.date.today().year+1))[::-1],
             key=f"year_{label}"
         )
 
@@ -207,46 +198,43 @@ def tuile_selector(label, dates_key):
         )
 
         start = f"{year}-{month_num}-01"
-        end = f"{year+1}-01-01" if month_num == "12" else f"{year}-{int(month_num)+1:02d}-01"
+        end   = f"{year+1}-01-01" if month_num == "12" else f"{year}-{int(month_num)+1:02d}-01"
 
-        if st.button(f"📅 Lister tuiles du mois ({label})"):
+        if st.button(f"📅 Rechercher ({label})"):
 
             col = (ee.ImageCollection("COPERNICUS/S2_SR")
-                  .filterBounds(aoi)
-                  .filterDate(start, end)
-                  .sort("system:time_start", False))
+                   .filterBounds(aoi)
+                   .filterDate(start, end)
+                   .sort("system:time_start", False))
 
             timestamps = col.aggregate_array("system:time_start").getInfo()
 
             if not timestamps:
-                st.error("❌ Aucune tuile ce mois.")
+                st.error("❌ Aucune tuile trouvée ce mois.")
                 return None, None
 
             month_dates = sorted(
-                {datetime.datetime.utcfromtimestamp(t/1000).date()
-                for t in timestamps},
+                {datetime.datetime.utcfromtimestamp(t/1000).date() for t in timestamps},
                 reverse=True
             )
 
             st.session_state[dates_key] = month_dates
 
         if st.session_state.get(dates_key):
-
             chosen = st.selectbox(
                 f"Dates du mois ({label})",
                 st.session_state[dates_key],
                 key=f"sel_month_{label}"
             )
 
-            if st.button(f"▶️ Charger cette date ({label})"):
+            if st.button(f"▶️ Charger cette tuile ({label})"):
                 return get_closest_s2_image(aoi, chosen)
 
         return None, None
 
-
-# ========================================================
+# ============================================================
 # ✅ MODE 1 — ANALYSE SIMPLE
-# ========================================================
+# ============================================================
 if analyse_mode == "Analyse simple (1 date)":
 
     st.header("🟩 Analyse NDVI – 1 Date")
@@ -258,7 +246,7 @@ if analyse_mode == "Analyse simple (1 date)":
         st.success(f"✅ Tuile utilisée : {d}")
 
         ndvi = compute_ndvi(img)
-        veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
+        veg_mask = compute_vegetation_mask(ndvi, 0.25)
 
         rows = []
 
@@ -267,7 +255,7 @@ if analyse_mode == "Analyse simple (1 date)":
             num_ilot = feat["properties"].get("NUM_ILOT", "ILOT")
 
             nd_mean, veg_prop = zonal_stats_ndvi(ndvi, veg_mask, geom)
-            classe_txt, col = classify_ndvi(nd_mean)
+            classe_txt, c = classify_ndvi(nd_mean)
 
             rows.append({
                 "NUM_ILOT": num_ilot,
@@ -281,9 +269,8 @@ if analyse_mode == "Analyse simple (1 date)":
         df = pd.DataFrame(rows)
         st.dataframe(df)
 
-        # CARTE NDVI
+        # Carte
         m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
-
         for i, feat in enumerate(features):
             geom = feat["geometry"]
             nd = df.iloc[i]["NDVI_moyen"]
@@ -291,77 +278,62 @@ if analyse_mode == "Analyse simple (1 date)":
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, c=color: {
-                    "fillColor": c, "color": "black",
+                style_function=lambda x, col=color: {
+                    "fillColor": col, "color": "black",
                     "weight": 1, "fillOpacity": 0.7
                 },
-                tooltip=f"{df.iloc[i]['NUM_ILOT']} — NDVI={nd:.2f}"
+                tooltip=f"{df.iloc[i]['NUM_ILOT']} - NDVI={nd:.2f}"
             ).add_to(m)
 
         st_folium(m, height=600)
 
         # Sauvegarde
         st.subheader("💾 Sauvegarder cette analyse")
-
         save_name = st.text_input("Nom de la sauvegarde", key="save_simple")
 
         if st.button("💾 Sauvegarder (1 date)"):
-            if not save_name:
-                st.error("Veuillez fournir un nom.")
-            else:
-                save_dataframe(
-                    df,
-                    "analyses_simple.csv",
-                    save_name,
-                    meta={"analysis_type": "simple", "date": str(d)}
-                )
-                st.success("✅ Analyse sauvegardée.")
+            save_dataframe(
+                df,
+                "analyses_simple.csv",
+                save_name,
+                meta={"analysis_type": "simple", "date": str(d)}
+            )
+            st.success("✅ Analyse sauvegardée.")
 
 
-# ========================================================
+# ============================================================
 # ✅ MODE 2 — COMPARAISON 2 DATES
-# ========================================================
+# ============================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
     st.header("🟦 Comparateur NDVI – Deux dates")
 
-    # Sélection Date A
-    st.subheader("📌 Date A (ancienne)")
+    # Date A
+    st.subheader("📌 Sélection Date A (ancienne)")
     imgA, dA = tuile_selector("A", "available_dates_A")
-
     if imgA and dA:
         st.session_state.imageA = imgA
         st.session_state.dateA = dA
         st.session_state.run_A = True
 
-    # Sélection Date B
-    st.subheader("📌 Date B (récente)")
+    # Date B
+    st.subheader("📌 Sélection Date B (récente)")
     imgB, dB = tuile_selector("B", "available_dates_B")
-
     if imgB and dB:
         st.session_state.imageB = imgB
         st.session_state.dateB = dB
         st.session_state.run_B = True
 
-    # Affichage statut
     st.markdown("### ✅ Statut sélection")
-
     if st.session_state.run_A:
         st.success(f"Date A : {st.session_state.dateA}")
-    else:
-        st.info("Date A non définie")
-
     if st.session_state.run_B:
         st.success(f"Date B : {st.session_state.dateB}")
-    else:
-        st.info("Date B non définie")
 
-    # Lancer comparaison
     if st.session_state.run_A and st.session_state.run_B:
         if st.button("📊 Comparer NDVI A ↔ B"):
             st.session_state.run_comparison = True
 
-    # Résultat comparaison
     if st.session_state.run_comparison:
 
         st.success(f"Comparaison : {st.session_state.dateA} → {st.session_state.dateB}")
@@ -377,16 +349,16 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
             ndA, _ = zonal_stats_ndvi(ndviA, None, geom)
             ndB, _ = zonal_stats_ndvi(ndviB, None, geom)
-            delta = (ndB - ndA) if (ndA is not None and ndB is not None) else None
 
-            txt, col = classify_delta(delta)
+            delta = (ndB - ndA) if ndA is not None and ndB is not None else None
+            trend_txt, trend_col = classify_delta(delta)
 
             rows.append({
                 "NUM_ILOT": num_ilot,
                 "NDVI_A": ndA,
                 "NDVI_B": ndB,
                 "Delta_NDVI": delta,
-                "Interprétation": txt
+                "Interprétation": trend_txt
             })
 
         dfc = pd.DataFrame(rows)
@@ -398,44 +370,39 @@ elif analyse_mode == "Comparaison entre 2 dates":
         for i, feat in enumerate(features):
             geom = feat["geometry"]
             delta = dfc.iloc[i]["Delta_NDVI"]
-            _, color = classify_delta(delta)
-
+            _, col = classify_delta(delta)
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, c=color: {
+                style_function=lambda x, c=col: {
                     "fillColor": c, "color": "black",
                     "weight": 1, "fillOpacity": 0.7
                 },
-                tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
+                tooltip=f"{dfc.iloc[i]['NUM_ILOT']} - ΔNDVI={delta}"
             ).add_to(m2)
 
         st_folium(m2, height=600)
 
         # Sauvegarde comparaison
         st.subheader("💾 Sauvegarder cette comparaison")
-
-        save_name = st.text_input("Nom de la sauvegarde", key="save_compare")
+        save_name = st.text_input("Nom de la sauvegarde comparaison", key="save_compare")
 
         if st.button("💾 Sauvegarder comparaison"):
-            if not save_name:
-                st.error("Veuillez fournir un nom")
-            else:
-                save_dataframe(
-                    dfc,
-                    "analyses_compare.csv",
-                    save_name,
-                    meta={
-                        "analysis_type": "comparaison",
-                        "dateA": str(st.session_state.dateA),
-                        "dateB": str(st.session_state.dateB)
-                    }
-                )
-                st.success("✅ Comparaison sauvegardée.")
+            save_dataframe(
+                dfc,
+                "analyses_compare.csv",
+                save_name,
+                meta={
+                    "analysis_type": "comparaison",
+                    "dateA": str(st.session_state.dateA),
+                    "dateB": str(st.session_state.dateB)
+                }
+            )
+            st.success("✅ Comparaison sauvegardée.")
 
 
-# ========================================================
+# ============================================================
 # ✅ MODE MEMOIRE
-# ========================================================
+# ============================================================
 else:
 
     st.header("📚 Mémoire des analyses sauvegardées")
@@ -446,11 +413,10 @@ else:
     if df1 is not None:
         st.subheader("🗂️ Analyses simples")
         st.dataframe(df1)
-    else:
-        st.info("Aucune analyse simple sauvegardée.")
 
     if df2 is not None:
         st.subheader("🗂️ Comparaisons NDVI")
         st.dataframe(df2)
-    else:
-        st.info("Aucune comparaison sauvegardée.")
+
+    if df1 is None and df2 is None:
+        st.info("Aucune sauvegarde trouvée.")
