@@ -5,6 +5,7 @@ from shapely.geometry import shape
 from streamlit_folium import st_folium
 import datetime
 import ee
+import os
 
 from utils.vector_io import load_vector
 from utils.gee_ndvi import (
@@ -19,13 +20,46 @@ from utils.ndvi_processing import zonal_stats_ndvi
 
 
 # -----------------------------------------------------------
-# ✅ INIT GEE
+# ✅ INIT EARTH ENGINE
 # -----------------------------------------------------------
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
-st.title("🌱 Analyse NDVI (1 date) & Comparateur NDVI (2 dates)")
+st.title("🌱 NDVI (1 date) & Comparateur NDVI (2 dates) — GEE")
+
+
+# -----------------------------------------------------------
+# ✅ SAVE FUNCTIONS (CSV)
+# -----------------------------------------------------------
+def ensure_history_dir():
+    if not os.path.exists("history"):
+        os.makedirs("history")
+
+
+def save_dataframe(df, filename, save_name, meta=None):
+    """Sauvegarde un dataframe dans history/<filename> avec un nom utilisateur."""
+    ensure_history_dir()
+    path = os.path.join("history", filename)
+
+    df2 = df.copy()
+    df2["save_name"] = save_name
+
+    if meta:
+        for k, v in meta.items():
+            df2[k] = v
+
+    if os.path.exists(path):
+        df2.to_csv(path, mode="a", header=False, index=False)
+    else:
+        df2.to_csv(path, mode="w", header=True, index=False)
+
+
+def load_history(filename):
+    path = os.path.join("history", filename)
+    if os.path.exists(path):
+        return pd.read_csv(path)
+    return None
 
 
 # -----------------------------------------------------------
@@ -48,6 +82,7 @@ DEFAULTS = {
     "run_single": False,
 
     "run_comparison": False,
+    "show_memory": False,
 }
 
 for k, v in DEFAULTS.items():
@@ -60,12 +95,12 @@ for k, v in DEFAULTS.items():
 # -----------------------------------------------------------
 analyse_mode = st.sidebar.radio(
     "Mode d'analyse",
-    ["Analyse simple (1 date)", "Comparaison entre 2 dates"]
+    ["Analyse simple (1 date)", "Comparaison entre 2 dates", "📚 Mémoire"]
 )
 
 
 # -----------------------------------------------------------
-# ✅ UPLOAD
+# ✅ UPLOAD SIG
 # -----------------------------------------------------------
 uploaded = st.file_uploader("📁 Upload SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
 
@@ -85,7 +120,7 @@ aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
 
 # -----------------------------------------------------------
-# ✅ CLASSIFICATION NDVI Kermap
+# ✅ CLASSIFICATION KERMAP
 # -----------------------------------------------------------
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé", "#bdbdbd")
@@ -108,29 +143,23 @@ def couvert_status(p):
 
 
 # -----------------------------------------------------------
-# ✅ TUile selector (3 modes)
+# ✅ SELECTEUR DE TUILE MODULABLE
 # -----------------------------------------------------------
-def tuile_selector(label, date_key, dates_key):
+def tuile_selector(label, dates_key):
     mode = st.radio(
         f"{label} – méthode de sélection",
         ["Dernière tuile", "Tuiles disponibles", "Recherche par mois"],
         key=f"mode_{label}"
     )
 
-    # ------------------------
-    # ✅ DERNIÈRE TUILE
-    # ------------------------
+    # Dernière tuile
     if mode == "Dernière tuile":
         if st.button(f"▶️ Charger dernière tuile ({label})"):
-            img, d = get_latest_s2_image(aoi)
-            return img, d
+            return get_latest_s2_image(aoi)
         return None, None
 
-    # ------------------------
-    # ✅ LISTE DES TUILES
-    # ------------------------
+    # Tuiles disponibles
     if mode == "Tuiles disponibles":
-
         if st.button(f"📅 Afficher tuiles ({label})"):
             st.session_state[dates_key] = get_available_s2_dates(aoi, 120)
 
@@ -141,16 +170,12 @@ def tuile_selector(label, date_key, dates_key):
                 format_func=lambda d: d.strftime("%Y-%m-%d"),
                 key=f"sel_{label}"
             )
-
             if st.button(f"▶️ Charger cette date ({label})"):
-                img, d = get_closest_s2_image(aoi, chosen)
-                return img, d
+                return get_closest_s2_image(aoi, chosen)
 
         return None, None
 
-    # ------------------------
-    # ✅ RECHERCHE PAR MOIS
-    # ------------------------
+    # Recherche par mois
     if mode == "Recherche par mois":
 
         year = st.selectbox(
@@ -179,7 +204,6 @@ def tuile_selector(label, date_key, dates_key):
                    .filterBounds(aoi)
                    .filterDate(start, end)
                    .sort("system:time_start", False))
-
             timestamps = col.aggregate_array("system:time_start").getInfo()
 
             if len(timestamps) == 0:
@@ -200,24 +224,23 @@ def tuile_selector(label, date_key, dates_key):
                 st.session_state[dates_key],
                 key=f"sel_month_{label}"
             )
-
             if st.button(f"▶️ Charger date ({label})"):
-                img, d = get_closest_s2_image(aoi, chosen)
-                return img, d
+                return get_closest_s2_image(aoi, chosen)
 
         return None, None
 
 
-# -----------------------------------------------------------
-# ✅ MODE 1 : ANALYSE SIMPLE
-# -----------------------------------------------------------
+# -----------------------------------------------------------------
+# ✅ MODE 1 : ANALYSE SIMPLE (1 DATE)
+# -----------------------------------------------------------------
 if analyse_mode == "Analyse simple (1 date)":
 
-    img, d = tuile_selector("Simple", "date_single", "available_dates_single")
+    img, d = tuile_selector("Simple", "available_dates_single")
 
     if img and d:
 
         st.success(f"✅ Tuile chargée : **{d}**")
+
         ndvi = compute_ndvi(img)
         veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
 
@@ -225,14 +248,14 @@ if analyse_mode == "Analyse simple (1 date)":
         for feat in features:
             geom = feat["geometry"]
             props = feat["properties"]
-            num_ilot = props.get("NUM_ILOT")
+            num_ilot = props.get("NUM_ILOT", "ILOT")
 
-            nd_mean, veg_prop = zonal_stats_ndvi(ndvi, veg_mask, geom)
-            classe_txt, classe_color = classify_ndvi(nd_mean)
+            ndvi_mean, veg_prop = zonal_stats_ndvi(ndvi, veg_mask, geom)
+            classe_txt, classe_color = classify_ndvi(ndvi_mean)
 
             rows.append({
                 "NUM_ILOT": num_ilot,
-                "NDVI_moyen": nd_mean,
+                "NDVI_moyen": ndvi_mean,
                 "Classe": classe_txt,
                 "Proportion_couvert": veg_prop,
                 "Couvert": couvert_status(veg_prop),
@@ -242,17 +265,18 @@ if analyse_mode == "Analyse simple (1 date)":
         df = pd.DataFrame(rows)
         st.dataframe(df)
 
+        # Carte NDVI
         m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
         for i, feat in enumerate(features):
             geom = feat["geometry"]
             nd = df.iloc[i]["NDVI_moyen"]
-            color = classify_ndvi(nd)[1]
+            col = classify_ndvi(nd)[1]
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, col=color: {
-                    "fillColor": col,
+                style_function=lambda x, c=col: {
+                    "fillColor": c,
                     "color": "black",
                     "weight": 1,
                     "fillOpacity": 0.7
@@ -262,129 +286,181 @@ if analyse_mode == "Analyse simple (1 date)":
 
         st_folium(m, height=600)
 
-        st.download_button(
-            "📥 Télécharger CSV",
-            df.to_csv(index=False).encode(),
-            "ndvi_1_date.csv"
-        )
+        # ------------------------------------------------------------------
+        # ✅ SAUVEGARDE ANALYSE SIMPLE
+        # ------------------------------------------------------------------
+        st.markdown("### 💾 Sauvegarder cette analyse")
+
+        save_name = st.text_input("Nom de la sauvegarde", key="save_simple")
+
+        if st.button("💾 Sauvegarder (1 date)"):
+
+            if not save_name:
+                st.error("Veuillez entrer un nom.")
+            else:
+                save_dataframe(
+                    df,
+                    "analyses_simple.csv",
+                    save_name,
+                    meta={"analysis_type": "simple", "date": str(d)}
+                )
+                st.success(f"✅ Analyse sauvegardée : **{save_name}**")
 
     st.stop()
 
 
-# -----------------------------------------------------------
-# ✅ MODE 2 : COMPARAISON
-# -----------------------------------------------------------
-st.header("🔄 Comparateur NDVI entre deux dates")
+# -----------------------------------------------------------------
+# ✅ MODE 2 : COMPARAISON ENTRE 2 DATES
+# -----------------------------------------------------------------
+if analyse_mode == "Comparaison entre 2 dates":
+
+    st.header("🔄 Comparateur NDVI entre deux dates")
+
+    # -------------------------
+    # 📌 DATE A
+    # -------------------------
+    st.subheader("📌 Choisir Date A")
+    imgA, dA = tuile_selector("A", "available_dates_A")
+
+    if imgA and dA:
+        st.session_state.imageA = imgA
+        st.session_state.dateA = dA
+        st.session_state.run_A = True
+
+    # -------------------------
+    # 📌 DATE B
+    # -------------------------
+    st.subheader("📌 Choisir Date B")
+    imgB, dB = tuile_selector("B", "available_dates_B")
+
+    if imgB and dB:
+        st.session_state.imageB = imgB
+        st.session_state.dateB = dB
+        st.session_state.run_B = True
+
+    # -------------------------
+    # ✅ AFFICHAGE PERMANENT DES STATUTS
+    # -------------------------
+    st.markdown("### ✅ Statut des sélections")
+
+    if st.session_state.run_A:
+        st.success(f"📌 Date A chargée : **{st.session_state.dateA}**")
+    else:
+        st.info("📌 Date A non définie")
+
+    if st.session_state.run_B:
+        st.success(f"📌 Date B chargée : **{st.session_state.dateB}**")
+    else:
+        st.info("📌 Date B non définie")
+
+    # -------------------------
+    # ✅ BOUTON COMPARER
+    # -------------------------
+    if st.session_state.run_A and st.session_state.run_B:
+        if st.button("📊 Comparer NDVI A ↔ B"):
+            st.session_state.run_comparison = True
+
+    # -------------------------
+    # ✅ ANALYSE COMPARATIVE
+    # -------------------------
+    if st.session_state.run_comparison:
+
+        st.success(f"Comparaison : {st.session_state.dateA} ➜ {st.session_state.dateB}")
+
+        ndviA = compute_ndvi(st.session_state.imageA)
+        ndviB = compute_ndvi(st.session_state.imageB)
+
+        rows = []
+
+        for feat in features:
+            geom = feat["geometry"]
+            props = feat["properties"]
+            num_ilot = props.get("NUM_ILOT")
+
+            ndA, _ = zonal_stats_ndvi(ndviA, None, geom)
+            ndB, _ = zonal_stats_ndvi(ndviB, None, geom)
+
+            delta = (ndB - ndA) if (ndA is not None and ndB is not None) else None
+            delta_txt, delta_col = classify_delta(delta)
+
+            rows.append({
+                "NUM_ILOT": num_ilot,
+                "NDVI_A": ndA,
+                "NDVI_B": ndB,
+                "Delta_NDVI": delta,
+                "Interprétation": delta_txt
+            })
+
+        dfc = pd.DataFrame(rows)
+        st.dataframe(dfc)
+
+        # Carte ΔNDVI
+        st.subheader("🗺️ Carte ΔNDVI")
+
+        m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
+
+        for i, feat in enumerate(features):
+            geom = feat["geometry"]
+            delta = dfc.iloc[i]["Delta_NDVI"]
+            _, col = classify_delta(delta)
+
+            folium.GeoJson(
+                geom.__geo_interface__,
+                style_function=lambda x, c=col: {
+                    "fillColor": c,
+                    "color": "black",
+                    "weight": 1,
+                    "fillOpacity": 0.7
+                },
+                tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
+            ).add_to(m2)
+
+        st_folium(m2, height=600)
+
+        # ------------------------------------------------------------------
+        # ✅ SAUVEGARDE COMPARAISON
+        # ------------------------------------------------------------------
+        st.markdown("### 💾 Sauvegarder cette comparaison")
+
+        save_name = st.text_input("Nom de la sauvegarde", key="save_compare")
+
+        if st.button("💾 Sauvegarder comparaison"):
+            if not save_name:
+                st.error("Veuillez entrer un nom.")
+            else:
+                save_dataframe(
+                    dfc,
+                    "analyses_compare.csv",
+                    save_name,
+                    meta={
+                        "analysis_type": "comparaison",
+                        "dateA": str(st.session_state.dateA),
+                        "dateB": str(st.session_state.dateB)
+                    }
+                )
+                st.success(f"✅ Comparaison sauvegardée : **{save_name}**")
+
+    st.stop()
 
 
-# -------------------------
-# ✅ DATE A : la plus ancienne
-# -------------------------
-st.subheader("📌 Choisir Date A : la plus ancienne")
-imgA, dA = tuile_selector("A", "dateA", "available_dates_A")
+# -----------------------------------------------------------------
+# ✅ MODE 3 : MEMOIRE DES ANALYSES
+# -----------------------------------------------------------------
+if analyse_mode == "📚 Mémoire":
 
-if imgA and dA:
-    st.session_state.imageA = imgA
-    st.session_state.dateA = dA
-    st.session_state.run_A = True
+    st.header("📚 Mémoire des analyses sauvegardées")
 
+    df_simple = load_history("analyses_simple.csv")
+    df_cmp = load_history("analyses_compare.csv")
 
-# -------------------------
-# ✅ DATE B : la plus récente
-# -------------------------
-st.subheader("📌 Choisir Date B : la plus récente")
-imgB, dB = tuile_selector("B", "dateB", "available_dates_B")
+    if df_simple is not None:
+        st.subheader("🗂️ Analyses simples sauvegardées")
+        st.dataframe(df_simple)
+    else:
+        st.info("Aucune analyse simple sauvegardée.")
 
-if imgB and dB:
-    st.session_state.imageB = imgB
-    st.session_state.dateB = dB
-    st.session_state.run_B = True
-
-
-# -----------------------------------------------------------
-# ✅ AFFICHAGE PERMANENT (PATCH)
-# -----------------------------------------------------------
-st.markdown("### ✅ Statut des sélections")
-if st.session_state.run_A:
-    st.success(f"📌 Date A chargée : **{st.session_state.dateA}**")
-else:
-    st.info("📌 Date A non définie")
-
-if st.session_state.run_B:
-    st.success(f"📌 Date B chargée : **{st.session_state.dateB}**")
-else:
-    st.info("📌 Date B non définie")
-
-
-# -----------------------------------------------------------
-# ✅ BOUTON COMPARER
-# -----------------------------------------------------------
-if st.session_state.run_A and st.session_state.run_B:
-    if st.button("📊 Comparer NDVI A ↔ B"):
-        st.session_state.run_comparison = True
-
-
-# -----------------------------------------------------------
-# ✅ ANALYSE COMPARATIVE
-# -----------------------------------------------------------
-if st.session_state.run_comparison:
-
-    st.success(f"Comparaison : {st.session_state.dateA} ➜ {st.session_state.dateB}")
-
-    ndviA = compute_ndvi(st.session_state.imageA)
-    ndviB = compute_ndvi(st.session_state.imageB)
-
-    rows = []
-
-    for feat in features:
-        geom = feat["geometry"]
-        props = feat["properties"]
-        num_ilot = props.get("NUM_ILOT")
-
-        ndA, _ = zonal_stats_ndvi(ndviA, None, geom)
-        ndB, _ = zonal_stats_ndvi(ndviB, None, geom)
-
-        delta = (ndB - ndA) if (ndA is not None and ndB is not None) else None
-        delta_txt, delta_col = classify_delta(delta)
-
-        rows.append({
-            "NUM_ILOT": num_ilot,
-            "NDVI_A": ndA,
-            "NDVI_B": ndB,
-            "Delta_NDVI": delta,
-            "Interprétation": delta_txt
-        })
-
-    dfc = pd.DataFrame(rows)
-    st.dataframe(dfc)
-
-    # -----------------------------------------------------------
-    # ✅ CARTE DELTA
-    # -----------------------------------------------------------
-    st.subheader("🗺️ Carte ΔNDVI")
-
-    m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
-
-    for i, feat in enumerate(features):
-        geom = feat["geometry"]
-        delta = dfc.iloc[i]["Delta_NDVI"]
-        _, col = classify_delta(delta)
-
-        folium.GeoJson(
-            geom.__geo_interface__,
-            style_function=lambda x, c=col: {
-                "fillColor": c,
-                "color": "black",
-                "weight": 1,
-                "fillOpacity": 0.7
-            },
-            tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
-        ).add_to(m2)
-
-    st_folium(m2, height=600)
-
-    st.download_button(
-        "📥 Télécharger CSV comparaison",
-        dfc.to_csv(index=False).encode(),
-        "ndvi_comparaison.csv"
-    )
+    if df_cmp is not None:
+        st.subheader("🗂️ Comparaisons sauvegardées")
+        st.dataframe(df_cmp)
+    else:
+        st.info("Aucune comparaison sauvegardée.")
