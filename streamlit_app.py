@@ -261,7 +261,7 @@ def tuile_selector(label, dates_key):
         return None, None
 
 # ============================================================
-# ✅ MODE 1 — ANALYSE SIMPLE (avec persistance)
+# ✅ MODE 1 — ANALYSE SIMPLE (1 date persistante)
 # ============================================================
 if analyse_mode == "Analyse simple (1 date)":
 
@@ -269,15 +269,18 @@ if analyse_mode == "Analyse simple (1 date)":
 
     img, d = tuile_selector("SIMPLE", "available_dates_single")
 
-    # ✅ Si l'utilisateur a cliqué sur un bouton ⇒ on met en mémoire
+    # ✅ Quand une tuile est chargée → on calcule et on stocke de manière persistante
     if img and d:
+        st.session_state.date_single = d
+
         ndvi = compute_ndvi(img)
         veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
 
         rows = []
         for feat in features:
             geom = feat["geometry"]
-            num_ilot = feat["properties"].get("NUM_ILOT", "ILOT")
+            props = feat["properties"]
+            num_ilot = props.get("NUM_ILOT", "ILOT")
 
             nd_mean, veg_prop = zonal_stats_ndvi(ndvi, veg_mask, geom)
             classe_txt, col = classify_ndvi(nd_mean)
@@ -291,28 +294,33 @@ if analyse_mode == "Analyse simple (1 date)":
                 "Date": str(d)
             })
 
-        df = pd.DataFrame(rows)
+        st.session_state.result_single = pd.DataFrame(rows)
 
-        st.session_state.result_single = df
-        st.session_state.map_single = ndvi
-        st.session_state.date_single = d
-
-
-    # ✅ AFFICHAGE PERSISTANT
+    # ✅ AFFICHAGE PERSISTANT (même si rerun)
     if st.session_state.result_single is not None:
 
-        st.success(f"✅ Résultats pour la tuile : {st.session_state.date_single}")
-
         df = st.session_state.result_single
+
+        st.success(f"✅ Résultats NDVI — Tuile utilisée : {st.session_state.date_single}")
         st.dataframe(df)
 
-        # ✅ Carte Folium stable
-        m = folium.Map(location=[(miny + maxy)/2, (minx + maxx)/2], zoom_start=14)
+        # ✅ CARTE NDVI AVEC CODE COULEUR KERMAP
+        m = folium.Map(
+            location=[(miny + maxy)/2, (minx + maxx)/2],
+            zoom_start=14
+        )
 
-        for i, feat in enumerate(features):
+        for idx, feat in enumerate(features):
             geom = feat["geometry"]
-            nd = df.iloc[i]["NDVI_moyen"]
-            _, color = classify_ndvi(nd)
+            nd = df.iloc[idx]["NDVI_moyen"]
+            classe_txt, color = classify_ndvi(nd)
+            num_ilot = df.iloc[idx]["NUM_ILOT"]
+
+            tooltip_html = (
+                f"<b>Ilot :</b> {num_ilot}<br>"
+                f"<b>NDVI :</b> {nd:.3f}<br>"
+                f"<b>Classe :</b> {classe_txt}"
+            )
 
             folium.GeoJson(
                 geom.__geo_interface__,
@@ -321,65 +329,72 @@ if analyse_mode == "Analyse simple (1 date)":
                     "color": "black",
                     "weight": 1,
                     "fillOpacity": 0.7
-                }
+                },
+                tooltip=tooltip_html
             ).add_to(m)
 
         st_folium(m, height=600)
 
         # ✅ Sauvegarde
         st.subheader("💾 Sauvegarder cette analyse")
+        raw_name = st.text_input("Nom de la sauvegarde", key="save_simple")
 
-        save_name = st.text_input("Nom de la sauvegarde", key="save_single")
+        # Nom sécurisé → empêche les CSV corrompus
+        import re
+        def sanitize_name(name):
+            name = name.strip().lower()
+            return re.sub(r"[^a-z0-9_-]+", "_", name)
+
+        save_name = sanitize_name(raw_name)
 
         if st.button("💾 Sauvegarder (1 date)"):
             if not save_name:
-                st.error("Veuillez entrer un nom.")
+                st.error("❌ Veuillez entrer un nom simple (lettres/chiffres)")
             else:
                 save_dataframe(
                     df,
                     "analyses_simple.csv",
                     save_name,
-                    meta={"analysis_type": "simple", "date": str(st.session_state.date_single)}
+                    meta={"analysis_type": "simple", "date": st.session_state.date_single}
                 )
-                st.success("✅ Analyse sauvegardée.")
-
+                st.success(f"✅ Analyse sauvegardée sous : {save_name}")
 
 # ============================================================
-# ✅ MODE 2 — COMPARATEUR 2 DATES (persistant)
+# ✅ MODE 2 — COMPARAISON NDVI A ↔ B (PERSISTANTE)
 # ============================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
-    st.header("🟦 Comparateur NDVI — A ↔ B")
+    st.header("🟦 Comparateur NDVI — Deux Dates")
 
-    # ✅ Sélection Date A
-    st.subheader("📌 Sélection Date A (ancienne)")
+    # ✅ Sélection A
+    st.subheader("📌 Date A (ancienne)")
     imgA, dA = tuile_selector("A", "available_dates_A")
     if imgA and dA:
         st.session_state.imageA = imgA
         st.session_state.dateA = dA
         st.session_state.run_A = True
 
-    # ✅ Sélection Date B
-    st.subheader("📌 Sélection Date B (récente)")
+    # ✅ Sélection B
+    st.subheader("📌 Date B (récente)")
     imgB, dB = tuile_selector("B", "available_dates_B")
     if imgB and dB:
         st.session_state.imageB = imgB
         st.session_state.dateB = dB
         st.session_state.run_B = True
 
-    # ✅ Affichage persistant des sélections
-    st.markdown("### ✅ Statut des sélections")
+    # ✅ Affichage permanent
+    st.markdown("### ✅ Statut")
     if st.session_state.run_A:
-        st.success(f"Date A chargée : {st.session_state.dateA}")
+        st.success(f"Date A : {st.session_state.dateA}")
     if st.session_state.run_B:
-        st.success(f"Date B chargée : {st.session_state.dateB}")
+        st.success(f"Date B : {st.session_state.dateB}")
 
-    # ✅ Bouton comparaison
+    # ✅ Comparer
     if st.session_state.run_A and st.session_state.run_B:
-        if st.button("📊 Lancer la comparaison A → B"):
+        if st.button("📊 Comparer A → B"):
             st.session_state.run_comparison = True
 
-    # ✅ Analyse comparative persistante
+    # ✅ Calcul persistant
     if st.session_state.run_comparison:
 
         ndviA = compute_ndvi(st.session_state.imageA)
@@ -388,13 +403,13 @@ elif analyse_mode == "Comparaison entre 2 dates":
         rows = []
         for feat in features:
             geom = feat["geometry"]
-            num_ilot = feat["properties"].get("NUM_ILOT", "ILOT")
+            props = feat["properties"]
+            num_ilot = props.get("NUM_ILOT", "ILOT")
 
             ndA, _ = zonal_stats_ndvi(ndviA, None, geom)
             ndB, _ = zonal_stats_ndvi(ndviB, None, geom)
 
-            delta = (ndB - ndA) if (ndA is not None and ndB is not None) else None
-
+            delta = ndB - ndA if ndA is not None and ndB is not None else None
             txt, col = classify_delta(delta)
 
             rows.append({
@@ -405,57 +420,60 @@ elif analyse_mode == "Comparaison entre 2 dates":
                 "Interprétation": txt
             })
 
-        dfc = pd.DataFrame(rows)
+        st.session_state.result_compare = pd.DataFrame(rows)
 
-        st.session_state.result_compare = dfc
-
-    # ✅ AFFICHAGE PERSISTANT
+    # ✅ Affichage persistant résultat
     if st.session_state.result_compare is not None:
 
         dfc = st.session_state.result_compare
         st.dataframe(dfc)
 
-        # ✅ Carte ΔNDVI stable
         m2 = folium.Map(location=[(miny + maxy)/2, (minx + maxx)/2], zoom_start=14)
 
-        for i, feat in enumerate(features):
+        for idx, feat in enumerate(features):
             geom = feat["geometry"]
-            delta = dfc.iloc[i]["Delta_NDVI"]
-            _, col = classify_delta(delta)
+            delta = dfc.iloc[idx]["Delta_NDVI"]
+            txt, color = classify_delta(delta)
+            num_ilot = dfc.iloc[idx]["NUM_ILOT"]
+
+            tooltip_html = (
+                f"<b>Ilot :</b> {num_ilot}<br>"
+                f"<b>NDVI A :</b> {dfc.iloc[idx]['NDVI_A']:.3f}<br>"
+                f"<b>NDVI B :</b> {dfc.iloc[idx]['NDVI_B']:.3f}<br>"
+                f"<b>ΔNDVI :</b> {delta:.3f}<br>"
+                f"<b>Tendance :</b> {txt}"
+            )
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, col=col: {
-                    "fillColor": col,
+                style_function=lambda x, col=color: {
+                    "fillColor": color,
                     "color": "black",
                     "weight": 1,
                     "fillOpacity": 0.7
-                }
+                },
+                tooltip=tooltip_html
             ).add_to(m2)
 
         st_folium(m2, height=600)
 
-        # ✅ Sauvegarde
+        # ✅ Sauvegarde comparaison
         st.subheader("💾 Sauvegarder cette comparaison")
-
-        save_name = st.text_input("Nom de la sauvegarde comparaison", key="save_compare")
+        raw_name = st.text_input("Nom de la sauvegarde comparaison", key="save_compare")
+        save_name = sanitize_name(raw_name)
 
         if st.button("💾 Sauvegarder comparaison"):
-            if not save_name:
-                st.error("Veuillez fournir un nom.")
-            else:
-                save_dataframe(
-                    dfc,
-                    "analyses_compare.csv",
-                    save_name,
-                    meta={
-                        "analysis_type": "comparaison",
-                        "dateA": str(st.session_state.dateA),
-                        "dateB": str(st.session_state.dateB)
-                    }
-                )
-                st.success("✅ Comparaison sauvegardée.")
-
+            save_dataframe(
+                dfc,
+                "analyses_compare.csv",
+                save_name,
+                meta={
+                    "analysis_type": "comparaison",
+                    "dateA": str(st.session_state.dateA),
+                    "dateB": str(st.session_state.dateB)
+                }
+            )
+            st.success(f"✅ Comparaison sauvegardée sous : {save_name}")
 
 # ============================================================
 # ✅ MODE 3 — MEMOIRE
