@@ -311,7 +311,7 @@ if analyse_mode == "Analyse simple (1 date)":
 
             tooltip_html = (
                 f"<b>Ilot :</b> {num_ilot}<br>"
-                f"<b>NDVI :</b> {nd:.3f}<br>"
+                f"<b>NDVI :</b> {fmt(nd)}<br>"
                 f"<b>Classe :</b> {classe_txt}"
             )
 
@@ -424,9 +424,9 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
             tooltip_html = (
                 f"<b>Ilot :</b> {num_ilot}<br>"
-                f"<b>NDVI A :</b> {dfc.iloc[idx]['NDVI_A']:.3f}<br>"
-                f"<b>NDVI B :</b> {dfc.iloc[idx]['NDVI_B']:.3f}<br>"
-                f"<b>Δ NDVI :</b> {delta:.3f}<br>"
+                f"<b>NDVI A :</b> {fmt(dfc.iloc[idx]['NDVI_A'])}<br>"
+                f"<b>NDVI B :</b> {fmt(dfc.iloc[idx]['NDVI_B'])}<br>
+                f"<b>Δ NDVI :</b> {fmt(delta)}<br>"
                 f"<b>Tendance :</b> {txt}"
             )
 
