@@ -26,7 +26,6 @@ def compute_ndvi(img):
     nir = next((b for b in nir_candidates if b in bands), None)
 
     if red is None or nir is None:
-        # NDVI masqué si aucune bande valide trouvée
         return ee.Image.constant(0).rename("NDVI").updateMask(ee.Image.constant(0))
 
     return img.normalizedDifference([nir, red]).rename("NDVI")
@@ -112,8 +111,8 @@ def get_closest_s2_image(aoi_geom, target_date, max_days=120):
         )
 
         img = col.first()
+
         if img.getInfo() is not None:
             return img, d
 
     return None, None
-``
