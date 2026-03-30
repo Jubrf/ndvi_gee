@@ -325,7 +325,7 @@ if analyse_mode == "Analyse simple (1 date)":
             folium.GeoJson(
                 geom.__geo_interface__,
                 style_function=lambda x, col=color: {
-                    "fillColor": color,
+                    "fillColor": col,
                     "color": "black",
                     "weight": 1,
                     "fillOpacity": 0.7
@@ -447,7 +447,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
             folium.GeoJson(
                 geom.__geo_interface__,
                 style_function=lambda x, col=color: {
-                    "fillColor": color,
+                    "fillColor": col,
                     "color": "black",
                     "weight": 1,
                     "fillOpacity": 0.7
