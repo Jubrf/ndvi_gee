@@ -21,6 +21,15 @@ from utils.gee_ndvi import (
 )
 from utils.ndvi_processing import zonal_stats_ndvi
 
+# ============================================================
+# ✅ Formatage sécurisé des valeurs NDVI
+# ============================================================
+def fmt(v):
+    """Format NDVI ou Delta NDVI en évitant les erreurs si None."""
+    try:
+        return f"{float(v):.3f}"
+    except:
+        return "NA"
 
 # ============================================================
 # ✅ INIT EARTH ENGINE
