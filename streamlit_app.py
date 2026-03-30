@@ -24,9 +24,8 @@ from utils.gee_ndvi import (
 )
 from utils.ndvi_processing import zonal_stats_ndvi
 
-
 # ============================================================
-# ✅ Formatage NDVI
+# ✅ Format NDVI
 # ============================================================
 def fmt(v):
     try:
@@ -34,9 +33,8 @@ def fmt(v):
     except:
         return "NA"
 
-
 # ============================================================
-# ✅ Earth Engine INIT
+# ✅ INIT GEE
 # ============================================================
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
@@ -44,9 +42,8 @@ init_gee(service_account, private_key)
 
 st.title("🌱 NDVI – Analyse simple & Comparateur (Kermap)")
 
-
 # ============================================================
-# ✅ Sauvegarde CSV
+# ✅ SAUVEGARDE CSV
 # ============================================================
 def ensure_history_dir():
     if not os.path.exists("history"):
@@ -76,14 +73,13 @@ def save_dataframe(df, filename, save_name, meta=None):
         df2.to_csv(path, mode="a", header=False, index=False)
 
 def load_history(filename):
-    path = os.path.join("history", filename)
+    path = os.path.join("history/", filename)
     if not os.path.exists(path):
         return None
     try:
         return pd.read_csv(path)
     except:
         return None
-
 
 # ============================================================
 # ✅ SESSION STATE INIT
@@ -103,19 +99,17 @@ DEFAULTS = {
 
     "result_single": None,
     "result_compare": None,
-
     "run_A": False,
     "run_B": False,
-    "run_comparison": False,
+    "run_comparison": False
 }
 
 for k,v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-
 # ============================================================
-# ✅ MODE SELECTION
+# ✅ SIDEBAR
 # ============================================================
 analyse_mode = st.sidebar.radio(
     "Mode",
@@ -126,28 +120,25 @@ analyse_mode = st.sidebar.radio(
     ]
 )
 
-
 # ============================================================
 # ✅ UPLOAD SIG
 # ============================================================
-uploaded = st.file_uploader("📁 Charger un SHP (ZIP) / GEOJSON", type=["zip","geojson"])
+uploaded = st.file_uploader("📁 Charger un SHP (ZIP) ou GEOJSON", type=["zip","geojson"])
 if not uploaded:
     st.stop()
 
 features = load_vector(uploaded)
 st.success(f"{len(features)} parcelles chargées ✅")
 
-
 # ============================================================
-# ✅ REPROJECTION EPSG:2154 → WGS84
+# ✅ REPROJECTION EPSG:2154 → WGS84 (CRUCIAL)
 # ============================================================
-project = pyproj.Transformer.from_crs("EPSG:2154","EPSG:4326",always_xy=True).transform
+project_to_wgs84 = pyproj.Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True).transform
 
 for f in features:
-    f["geometry"] = transform(project, f["geometry"])  # ✅ CRUCIAL
+    f["geometry"] = transform(project_to_wgs84, f["geometry"])
 
-
-# Recalcule AOI
+# ✅ Recalcul AOI en WGS84
 geoms = [f["geometry"] for f in features]
 minx = min(g.bounds[0] for g in geoms)
 miny = min(g.bounds[1] for g in geoms)
@@ -156,9 +147,11 @@ maxy = max(g.bounds[3] for g in geoms)
 
 aoi = ee.Geometry.Rectangle([minx,miny,maxx,maxy])
 
+# DEBUG AOI
+st.write("DEBUG AOI (WGS84) :", [minx,miny,maxx,maxy])
 
 # ============================================================
-# ✅ Classification couleurs
+# ✅ Classification NDVI Kermap
 # ============================================================
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé","#bdbdbd")
@@ -177,19 +170,15 @@ def covered(v):
     return "✅ Couvert" if v>=0.5 else "❌ Non couvert"
 
 def colorize(nd):
-    if nd is None:
-        return "#bbbbbb"
-    if nd < 0.25:
-        return "#d73027"
-    if nd < 0.50:
-        return "#fee08b"
+    if nd is None: return "#bbbbbb"
+    if nd < 0.25: return "#d73027"
+    if nd < 0.50: return "#fee08b"
     return "#1a9850"
 
-
 # ============================================================
-# ✅ Sélecteur de tuiles
+# ✅ SELECTEUR DE TUILES
 # ============================================================
-def tuile_selector(label,dates_key):
+def tuile_selector(label, dates_key):
 
     mode = st.radio(
         f"Choisir la tuile ({label})",
@@ -210,11 +199,11 @@ def tuile_selector(label,dates_key):
             chosen = st.selectbox(
                 f"Dates ({label})",
                 st.session_state[dates_key],
-                key=f"sel_{label}",
-                format_func=lambda x: x.strftime("%Y-%m-%d")
+                key=f"sel_{label}"
             )
             if st.button(f"Charger ({label})"):
                 return get_closest_s2_image(aoi,chosen)
+
         return None,None
 
     if mode=="Recherche par mois":
@@ -281,18 +270,16 @@ if analyse_mode=="Analyse simple (1 date)":
 
     img, d = tuile_selector("SIMPLE","available_dates_single")
 
+    # DEBUGS
     st.write("DEBUG image chargée :", img is not None)
     st.write("DEBUG date trouvée :", d)
 
-    # DEBUG FOOTPRINT + AOI
     if img is not None:
         try:
             st.write("DEBUG S2 footprint :", img.geometry().bounds().getInfo())
-            st.write("DEBUG AOI (WGS84) :", [minx,miny,maxx,maxy])
         except Exception as e:
             st.error(f"Erreur debug footprint : {e}")
 
-    # ✅ Calcul NDVI
     if img is not None and d is not None:
 
         st.session_state.date_single = d
@@ -319,7 +306,6 @@ if analyse_mode=="Analyse simple (1 date)":
 
         st.session_state.result_single = pd.DataFrame(rows)
 
-    # ✅ AFFICHAGE
     if st.session_state.result_single is not None:
 
         df = st.session_state.result_single
@@ -367,11 +353,12 @@ if analyse_mode=="Analyse simple (1 date)":
 
 
 # ============================================================
-# ✅ MODE 2 — COMPARATEUR
+# ✅ MODE 2 — COMPARATEUR (light)
 # ============================================================
 elif analyse_mode=="Comparaison entre 2 dates":
 
     st.header("🟦 Comparaison NDVI — A → B")
+
     st.info("⚠️ Debug désactivé ici pour se concentrer sur l’analyse simple.")
 
     st.subheader("📌 Date A")
@@ -388,8 +375,10 @@ elif analyse_mode=="Comparaison entre 2 dates":
         st.session_state.dateB=dB
         st.session_state.run_B=True
 
-    if st.session_state.run_A: st.success(f"A : {st.session_state.dateA}")
-    if st.session_state.run_B: st.success(f"B : {st.session_state.dateB}")
+    if st.session_state.run_A:
+        st.success(f"A : {st.session_state.dateA}")
+    if st.session_state.run_B:
+        st.success(f"B : {st.session_state.dateB}")
 
     if st.session_state.run_A and st.session_state.run_B:
         if st.button("📊 Comparer"):
@@ -424,6 +413,7 @@ elif analyse_mode=="Comparaison entre 2 dates":
     if st.session_state.result_compare is not None:
 
         dfc = st.session_state.result_compare
+
         st.dataframe(dfc)
 
         m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=13)
@@ -476,6 +466,7 @@ elif analyse_mode=="Comparaison entre 2 dates":
 # ✅ MODE 3 — MÉMOIRE
 # ============================================================
 else:
+
     st.header("📚 Mémoire des analyses")
 
     df1 = load_history("analyses_simple.csv")
