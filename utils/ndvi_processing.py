@@ -1,22 +1,26 @@
 import ee
+from shapely.geometry import Polygon, MultiPolygon
 
 def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
     """
-    Calcule :
-    - NDVI moyen sur la parcelle
-    - Proportion NDVI > 0.25 (uniquement si veg_mask != None)
-
-    Fonction compatible :
-    ✅ Analyse simple -> veg_mask = image booléenne NDVI > 0.25
-    ✅ Comparaison 2 dates -> veg_mask = None (pas de masque)
+    Calcule NDVI moyen + proportion NDVI>0.25
+    Fonction robuste : gère Polygon et MultiPolygon
     """
 
-    # Conversion de la géométrie shapely → Earth Engine
-    geom_ee = ee.Geometry.Polygon(list(geom.exterior.coords))
+    # ✅ Conversion shapely → Earth Engine Geometry
+    if isinstance(geom, Polygon):
+        geom_ee = ee.Geometry.Polygon(list(geom.exterior.coords))
 
-    # -------------------------------------------------------
-    # ✅ NDVI MOYEN (toujours calculé)
-    # -------------------------------------------------------
+    elif isinstance(geom, MultiPolygon):
+        parts = []
+        for poly in geom:
+            parts.append(ee.Geometry.Polygon(list(poly.exterior.coords)))
+        geom_ee = ee.Geometry.MultiPolygon(parts)
+
+    else:
+        return None, None   # type inconnu
+
+    # ✅ NDVI moyen
     mean_dict = ndvi_img.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=geom_ee,
@@ -28,15 +32,11 @@ def zonal_stats_ndvi(ndvi_img, veg_mask, geom):
     if ndvi_mean is not None:
         ndvi_mean = float(ndvi_mean)
 
-    # -------------------------------------------------------
-    # ✅ Mode comparaison → veg_prop = None
-    # -------------------------------------------------------
+    # ✅ Mode comparaison → pas de calcul du masque
     if veg_mask is None:
         return ndvi_mean, None
 
-    # -------------------------------------------------------
-    # ✅ Mode analyse simple → proportion NDVI > seuil
-    # -------------------------------------------------------
+    # ✅ Proportion NDVI>0.25
     veg_dict = veg_mask.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=geom_ee,
