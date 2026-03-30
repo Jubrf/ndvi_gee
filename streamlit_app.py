@@ -8,9 +8,9 @@ import datetime
 import ee
 import os
 
-# ================================================================
+# ========================================================
 # ✅ IMPORTS UTILS
-# ================================================================
+# ========================================================
 from utils.vector_io import load_vector
 from utils.gee_ndvi import (
     init_gee,
@@ -23,19 +23,19 @@ from utils.gee_ndvi import (
 from utils.ndvi_processing import zonal_stats_ndvi
 
 
-# ================================================================
-# ✅ INITIALISATION GEE
-# ================================================================
+# ========================================================
+# ✅ INIT GEE
+# ========================================================
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
 init_gee(service_account, private_key)
 
-st.title("🌱 NDVI – Analyse simple & Comparateur NDVI 2 dates")
+st.title("🌱 NDVI – Analyse simple & Comparateur NDVI (2 dates)")
 
 
-# ================================================================
-# ✅ MODULE DE SAUVEGARDE CSV
-# ================================================================
+# ========================================================
+# ✅ MODULE SAUVEGARDE CSV
+# ========================================================
 def ensure_history_dir():
     if not os.path.exists("history"):
         os.makedirs("history")
@@ -63,9 +63,9 @@ def load_history(filename):
     return None
 
 
-# ================================================================
+# ========================================================
 # ✅ SESSION STATE
-# ================================================================
+# ========================================================
 DEFAULTS = {
     "available_dates_single": None,
     "available_dates_A": None,
@@ -90,9 +90,9 @@ for k, v in DEFAULTS.items():
         st.session_state[k] = v
 
 
-# ================================================================
-# ✅ SIDEBAR : choix du mode
-# ================================================================
+# ========================================================
+# ✅ SIDEBAR MODES
+# ========================================================
 analyse_mode = st.sidebar.radio(
     "Mode d'analyse",
     [
@@ -103,9 +103,9 @@ analyse_mode = st.sidebar.radio(
 )
 
 
-# ================================================================
+# ========================================================
 # ✅ UPLOAD SIG
-# ================================================================
+# ========================================================
 uploaded = st.file_uploader("📁 Charger un SHP (ZIP) ou GEOJSON", type=["zip", "geojson"])
 
 if not uploaded:
@@ -123,9 +123,9 @@ maxy = max(g.bounds[3] for g in geoms)
 aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
 
-# ================================================================
-# ✅ CLASSIFICATIONS
-# ================================================================
+# ========================================================
+# ✅ CLASSES NDVI
+# ========================================================
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé", "#bdbdbd")
     if nd < 0.25: return ("Sol nu", "#d73027")
@@ -138,16 +138,17 @@ def classify_delta(delta):
     if delta > 0.10: return ("Hausse", "#1a9850")
     return ("Stable", "#fee08b")
 
-def couvert_status(p):
-    if p is None: return "Indéterminé"
-    return "✅ Couvert (≥50%)" if p >= 0.5 else "❌ Non couvert (<50%)"
+def couvert_status(v):
+    if v is None:
+        return "Indéterminé"
+    return "✅ Couvert (≥50%)" if v >= 0.5 else "❌ Non couvert (<50%)"
 
 
-# ================================================================
-# ✅ LÉGENDES — VERSION 100% SÉCURISÉE
-# ================================================================
+# ========================================================
+# ✅ LÉGENDES FOLIUM — VERSION SÉCURISÉE
+# ========================================================
 def add_legend_ndvi(m):
-    if m is None:
+    if m is None or not hasattr(m, "get_root"):
         return
     html = """
     {% macro html() %}
@@ -163,11 +164,15 @@ def add_legend_ndvi(m):
     """
     macro = MacroElement()
     macro._template = Template(html)
-    m.get_root().add_child(macro)
+
+    try:
+        m.get_root().add_child(macro)
+    except Exception:
+        pass
 
 
 def add_legend_delta(m):
-    if m is None:
+    if m is None or not hasattr(m, "get_root"):
         return
     html = """
     {% macro html() %}
@@ -183,12 +188,16 @@ def add_legend_delta(m):
     """
     macro = MacroElement()
     macro._template = Template(html)
-    m.get_root().add_child(macro)
+
+    try:
+        m.get_root().add_child(macro)
+    except Exception:
+        pass
 
 
-# ================================================================
+# ========================================================
 # ✅ SELECTEUR DE TUILE
-# ================================================================
+# ========================================================
 def tuile_selector(label, dates_key):
 
     mode = st.radio(
@@ -203,9 +212,8 @@ def tuile_selector(label, dates_key):
             return get_latest_s2_image(aoi)
         return None, None
 
-    # Tuiles disponibles
+    # Liste tuiles
     if mode == "Tuiles disponibles":
-
         if st.button(f"📅 Lister tuiles ({label})"):
             st.session_state[dates_key] = get_available_s2_dates(aoi, 120)
 
@@ -278,9 +286,9 @@ def tuile_selector(label, dates_key):
         return None, None
 
 
-# ======================================================================
-# ✅ MODE 1 — ANALYSE SIMPLE
-# ======================================================================
+# ========================================================
+# ✅ MODE 1 : ANALYSE SIMPLE
+# ========================================================
 if analyse_mode == "Analyse simple (1 date)":
 
     st.header("🟩 Analyse NDVI – 1 Date")
@@ -351,14 +359,15 @@ if analyse_mode == "Analyse simple (1 date)":
                 st.success("✅ Analyse sauvegardée.")
 
 
-# ======================================================================
-# ✅ MODE 2 — COMPARAISON 2 DATES
-# ======================================================================
+# ========================================================
+# ✅ MODE 2 : COMPARATEUR 2 DATES
+# ========================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
     st.header("🟦 Comparateur NDVI – Deux dates")
 
-    st.subheader("📌 Sélection Date A (ancienne)")
+    # DATE A
+    st.subheader("📌 Date A (ancienne)")
     imgA, dA = tuile_selector("A", "available_dates_A")
 
     if imgA and dA:
@@ -366,7 +375,8 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.dateA = dA
         st.session_state.run_A = True
 
-    st.subheader("📌 Sélection Date B (récente)")
+    # DATE B
+    st.subheader("📌 Date B (récente)")
     imgB, dB = tuile_selector("B", "available_dates_B")
 
     if imgB and dB:
@@ -375,6 +385,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
         st.session_state.run_B = True
 
     st.markdown("### ✅ Statut sélection")
+
     if st.session_state.run_A:
         st.success(f"Date A chargée : {st.session_state.dateA}")
     else:
@@ -397,6 +408,7 @@ elif analyse_mode == "Comparaison entre 2 dates":
         ndviB = compute_ndvi(st.session_state.imageB)
 
         rows = []
+
         for feat in features:
             geom = feat["geometry"]
             num_ilot = feat["properties"].get("NUM_ILOT", "ILOT")
@@ -418,63 +430,6 @@ elif analyse_mode == "Comparaison entre 2 dates":
         dfc = pd.DataFrame(rows)
         st.dataframe(dfc)
 
+        # CARTE ΔNDVI
         m2 = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
-        for i, feat in enumerate(features):
-            geom = feat["geometry"]
-            delta = dfc.iloc[i]["Delta_NDVI"]
-            _, col = classify_delta(delta)
-
-            folium.GeoJson(
-                geom.__geo_interface__,
-                style_function=lambda x, c=col: {
-                    "fillColor": c, "color": "black",
-                    "weight": 1, "fillOpacity": 0.7
-                },
-                tooltip=f"{dfc.iloc[i]['NUM_ILOT']} — ΔNDVI={delta}"
-            ).add_to(m2)
-
-        add_legend_delta(m2)
-        st_folium(m2, height=600)
-
-        st.subheader("💾 Sauvegarder cette comparaison")
-
-        save_name = st.text_input("Nom de la sauvegarde", key="save_compare")
-
-        if st.button("💾 Sauvegarder comparaison"):
-            if not save_name:
-                st.error("Veuillez fournir un nom.")
-            else:
-                save_dataframe(
-                    dfc,
-                    "analyses_compare.csv",
-                    save_name,
-                    meta={
-                        "analysis_type": "comparaison",
-                        "dateA": str(st.session_state.dateA),
-                        "dateB": str(st.session_state.dateB)
-                    }
-                )
-                st.success("✅ Comparaison sauvegardée.")
-
-
-# ======================================================================
-# ✅ MODE 3 — MEMOIRE
-# ======================================================================
-else:
-    st.header("📚 Mémoire des analyses")
-
-    df1 = load_history("analyses_simple.csv")
-    df2 = load_history("analyses_compare.csv")
-
-    if df1 is not None:
-        st.subheader("🗂️ Analyses simples")
-        st.dataframe(df1)
-    else:
-        st.info("Aucune analyse simple sauvegardée.")
-
-    if df2 is not None:
-        st.subheader("🗂️ Comparaisons NDVI")
-        st.dataframe(df2)
-    else:
-        st.info("Aucune comparaison sauvegardée.")
