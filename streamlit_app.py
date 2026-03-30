@@ -147,53 +147,56 @@ def couvert_status(v):
 # ========================================================
 # ✅ LÉGENDES FOLIUM — VERSION SÉCURISÉE
 # ========================================================
-def add_legend_ndvi(m):
-    if m is None or not hasattr(m, "get_root"):
-        return
-    html = """
-    {% macro html() %}
-    <div style="position: fixed; bottom: 40px; right: 10px;
-                z-index:9999; background: rgba(255,255,255,.95);
-                padding:10px; border-radius:5px; border:1px solid #999;">
-        <b>Légende NDVI</b><br>
-        <i style="background:#d73027;width:12px;height:12px;display:inline-block"></i> Sol nu<br>
-        <i style="background:#fee08b;width:12px;height:12px;display:inline-block"></i> Végétation faible<br>
-        <i style="background:#1a9850;width:12px;height:12px;display:inline-block"></i> Végétation dense<br>
-    </div>
-    {% endmacro %}
-    """
-    macro = MacroElement()
-    macro._template = Template(html)
+from folium import Element
 
-    try:
-        m.get_root().add_child(macro)
-    except Exception:
-        pass
+def add_legend_ndvi(m):
+    if m is None:
+        return
+
+    legend_html = """
+    <div style="
+        position: fixed;
+        bottom: 40px;
+        right: 10px;
+        z-index: 9999;
+        background-color: rgba(255,255,255,0.9);
+        padding: 10px;
+        border: 1px solid #999;
+        border-radius: 5px;
+        font-size: 14px;">
+        <b>Légende NDVI</b><br>
+        <i style='background:#d73027;width:12px;height:12px;display:inline-block;'></i> Sol nu<br>
+        <i style='background:#fee08b;width:12px;height:12px;display:inline-block;'></i> Végétation faible<br>
+        <i style='background:#1a9850;width:12px;height:12px;display:inline-block;'></i> Végétation dense
+    </div>
+    """
+
+    m.get_root().html.add_child(Element(legend_html))
 
 
 def add_legend_delta(m):
-    if m is None or not hasattr(m, "get_root"):
+    if m is None:
         return
-    html = """
-    {% macro html() %}
-    <div style="position: fixed; bottom: 40px; right: 10px;
-                z-index:9999; background: rgba(255,255,255,.95);
-                padding:10px; border-radius:5px; border:1px solid #999;">
+
+    legend_html = """
+    <div style="
+        position: fixed;
+        bottom: 40px;
+        right: 10px;
+        z-index: 9999;
+        background-color: rgba(255,255,255,0.9);
+        padding: 10px;
+        border: 1px solid #999;
+        border-radius: 5px;
+        font-size: 14px;">
         <b>Légende ΔNDVI</b><br>
-        <i style="background:#d73027;width:12px;height:12px;display:inline-block"></i> Baisse<br>
-        <i style="background:#fee08b;width:12px;height:12px;display:inline-block"></i> Stable<br>
-        <i style="background:#1a9850;width:12px;height:12px;display:inline-block"></i> Hausse<br>
+        <i style='background:#d73027;width:12px;height:12px;display:inline-block;'></i> Baisse<br>
+        <i style='background:#fee08b;width:12px;height:12px;display:inline-block;'></i> Stable<br>
+        <i style='background:#1a9850;width:12px;height:12px;display:inline-block;'></i> Hausse
     </div>
-    {% endmacro %}
     """
-    macro = MacroElement()
-    macro._template = Template(html)
 
-    try:
-        m.get_root().add_child(macro)
-    except Exception:
-        pass
-
+    m.get_root().html.add_child(Element(legend_html))
 
 # ========================================================
 # ✅ SELECTEUR DE TUILE
