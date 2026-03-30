@@ -103,7 +103,7 @@ DEFAULTS = {
     "run_comparison": False,
 }
 
-for k,v in DEFAULTS.items():
+for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -130,15 +130,15 @@ features = load_vector(uploaded)
 st.success(f"{len(features)} parcelles chargées ✅")
 
 geoms = [f["geometry"] for f in features]
-minx = min([g.bounds[0] for g in geoms])
-miny = min([g.bounds[1] for g in geoms])
-maxx = max([g.bounds[2] for g in geoms])
-maxy = max([g.bounds[3] for g in geoms])
+minx = min(g.bounds[0] for g in geoms)
+miny = min(g.bounds[1] for g in geoms)
+maxx = max(g.bounds[2] for g in geoms)
+maxy = max(g.bounds[3] for g in geoms)
 
-aoi = ee.Geometry.Rectangle([minx,miny,maxx,maxy])
+aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
 # ============================================================
-# ✅ CLASSIFICATIONS
+# ✅ CLASSIFICATION NDVI & COULEURS KERMAP
 # ============================================================
 def classify_ndvi(nd):
     if nd is None: return ("Indéterminé","#bdbdbd")
@@ -152,12 +152,11 @@ def classify_delta(delta):
     if delta > 0.10: return ("Hausse","#1a9850")
     return ("Stable","#fee08b")
 
-def couvert_status(val):
-    if val is None:
-        return "Indéterminé"
-    return "✅ Couvert (≥50%)" if val >= 0.5 else "❌ Non couvert (<50%)"
+def couvert_status(v):
+    if v is None: return "Indéterminé"
+    return "✅ Couvert (≥50%)" if v >= 0.5 else "❌ Non couvert (<50%)"
 
-# ✅ Colorisation Kermap
+# ✅ Fonction couleur Kermap
 def colorize(nd):
     if nd is None:
         return "#bbbbbb"
@@ -171,19 +170,18 @@ def colorize(nd):
 # ✅ SELECTEUR DE TUILE
 # ============================================================
 def tuile_selector(label, dates_key):
+
     mode = st.radio(
         f"Choisir la tuile ({label})",
         ["Dernière tuile","Tuiles disponibles","Recherche par mois"],
         key=f"mode_{label}"
     )
 
-    # Dernière tuile
     if mode == "Dernière tuile":
         if st.button(f"🔍 Charger dernière tuile ({label})"):
             return get_latest_s2_image(aoi)
         return None,None
 
-    # Liste
     if mode == "Tuiles disponibles":
         if st.button(f"📅 Lister ({label})"):
             st.session_state[dates_key] = get_available_s2_dates(aoi,120)
@@ -199,7 +197,6 @@ def tuile_selector(label, dates_key):
                 return get_closest_s2_image(aoi,chosen)
         return None,None
 
-    # Recherche par mois
     if mode == "Recherche par mois":
 
         year = st.selectbox(
@@ -238,8 +235,7 @@ def tuile_selector(label, dates_key):
                 return None,None
 
             month_dates = sorted(
-                {datetime.datetime.fromtimestamp(t/1000, datetime.UTC).date()
-                for t in timestamps},
+                {datetime.datetime.fromtimestamp(t/1000, datetime.UTC).date() for t in timestamps},
                 reverse=True
             )
 
@@ -260,7 +256,7 @@ def tuile_selector(label, dates_key):
 
 
 # =============================================================================
-# ✅ MODE 1 — ANALYSE SIMPLE (avec DEBUG)
+# ✅ MODE 1 — ANALYSE SIMPLE (avec debug)
 # =============================================================================
 if analyse_mode == "Analyse simple (1 date)":
 
@@ -268,14 +264,14 @@ if analyse_mode == "Analyse simple (1 date)":
 
     img, d = tuile_selector("SIMPLE","available_dates_single")
 
-    # ✅ DEBUG BANDES – SÉCURISÉ (NE PLANTE PAS)
+    # ✅ DEBUG (ne s'exécute QUE si img est chargé)
     if img is not None:
         try:
-            st.write("DEBUG bands SIMPLE :", img.bandNames().getInfo())
+            st.write("DEBUG bands SIMPLE:", img.bandNames().getInfo())
         except Exception as e:
-            st.error(f"Erreur DEBUG bands : {e}")
+            st.error(f"Erreur DEBUG bands SIMPLE : {e}")
 
-    # ✅ Calcul NDVI uniquement si image OK
+    # ✅ Calcul NDVI
     if img is not None and d is not None:
 
         st.session_state.date_single = d
@@ -302,33 +298,30 @@ if analyse_mode == "Analyse simple (1 date)":
 
         st.session_state.result_single = pd.DataFrame(rows)
 
-    # ✅ AFFICHAGE PERSISTANT
+    # ✅ AFFICHAGE RÉSULTATS
     if st.session_state.result_single is not None:
 
         df = st.session_state.result_single
-        st.success(f"✅ Résultats NDVI — Tuile : {st.session_state.date_single}")
+        st.success(f"✅ Résultats NDVI — Tuile utilisée : {st.session_state.date_single}")
         st.dataframe(df)
 
-        # ✅ CARTE NDVI KERMAP
+        # ✅ CARTE NDVI
         m = folium.Map(location=[(miny+maxy)/2,(minx+maxx)/2], zoom_start=14)
 
         for idx, feat in enumerate(features):
             geom = feat["geometry"]
-            num_ilot = df.iloc[idx]["NUM_ILOT"]
             nd = df.iloc[idx]["NDVI_moyen"]
-            classe_txt = df.iloc[idx]["Classe"]
-
             color = colorize(nd)
 
             tooltip_html = (
-                f"<b>Ilot :</b> {num_ilot}<br>"
+                f"<b>Ilot :</b> {df.iloc[idx]['NUM_ILOT']}<br>"
                 f"<b>NDVI :</b> {fmt(nd)}<br>"
-                f"<b>Classe :</b> {classe_txt}"
+                f"<b>Classe :</b> {df.iloc[idx]['Classe']}"
             )
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, col=color: {
+                style_function=lambda x,col=color:{
                     "fillColor": col,
                     "color": "black",
                     "weight": 1,
@@ -358,7 +351,7 @@ if analyse_mode == "Analyse simple (1 date)":
 
 
 # =============================================================================
-# ✅ MODE 2 — COMPARATEUR NDVI
+# ✅ MODE COMPARATEUR (inchangé – pas de debug ici pour l’instant)
 # =============================================================================
 elif analyse_mode == "Comparaison entre 2 dates":
 
@@ -396,8 +389,8 @@ elif analyse_mode == "Comparaison entre 2 dates":
             geom=feat["geometry"]
             num_ilot=feat["properties"].get("NUM_ILOT","ILOT")
 
-            ndA,_=zonal_stats_ndvi(ndviA,None,geom)
-            ndB,_=zonal_stats_ndvi(ndviB,None,geom)
+            ndA,_ = zonal_stats_ndvi(ndviA,None,geom)
+            ndB,_ = zonal_stats_ndvi(ndviB,None,geom)
 
             delta = ndB-ndA if ndA is not None and ndB is not None else None
             txt,col = classify_delta(delta)
@@ -421,22 +414,20 @@ elif analyse_mode == "Comparaison entre 2 dates":
 
         for idx, feat in enumerate(features):
             geom = feat["geometry"]
-            num_ilot = dfc.iloc[idx]["NUM_ILOT"]
             delta = dfc.iloc[idx]["Delta_NDVI"]
-            txt = dfc.iloc[idx]["Interprétation"]
             color = colorize(delta)
 
             tooltip_html = (
-                f"<b>Ilot :</b> {num_ilot}<br>"
+                f"<b>Ilot :</b> {dfc.iloc[idx]['NUM_ILOT']}<br>"
                 f"<b>NDVI A :</b> {fmt(dfc.iloc[idx]['NDVI_A'])}<br>"
                 f"<b>NDVI B :</b> {fmt(dfc.iloc[idx]['NDVI_B'])}<br>"
                 f"<b>Δ NDVI :</b> {fmt(delta)}<br>"
-                f"<b>Tendance :</b> {txt}"
+                f"<b>Tendance :</b> {dfc.iloc[idx]['Interprétation']}"
             )
 
             folium.GeoJson(
                 geom.__geo_interface__,
-                style_function=lambda x, col=color: {
+                style_function=lambda x,col=color:{
                     "fillColor": col,
                     "color": "black",
                     "weight": 1,
