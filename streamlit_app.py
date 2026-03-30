@@ -19,7 +19,7 @@ from utils.ndvi_processing import zonal_stats_ndvi
 
 
 # -----------------------------------------------------------
-# ✅ INITIALISATION GEE
+# ✅ INITIALISATION EARTH ENGINE
 # -----------------------------------------------------------
 service_account = st.secrets["GEE_SERVICE_ACCOUNT"]
 private_key = st.secrets["GEE_PRIVATE_KEY"]
@@ -31,7 +31,7 @@ uploaded = st.file_uploader("📁 Upload SHP (ZIP) ou GEOJSON", type=["zip", "ge
 
 
 # -----------------------------------------------------------
-# ✅ Classification type Kermap
+# ✅ Classification Kermap
 # -----------------------------------------------------------
 def classify_ndvi(ndvi):
     if ndvi is None:
@@ -62,13 +62,19 @@ def colorize_kermap(ndvi):
 
 
 # -----------------------------------------------------------
-# ✅ SESSION STATE (évite la perte de sélection)
+# ✅ SESSION STATE
 # -----------------------------------------------------------
 if "available_dates" not in st.session_state:
     st.session_state.available_dates = None
 
 if "selected_date" not in st.session_state:
     st.session_state.selected_date = None
+
+if "image" not in st.session_state:
+    st.session_state.image = None
+
+if "date_used" not in st.session_state:
+    st.session_state.date_used = None
 
 if "run_analysis" not in st.session_state:
     st.session_state.run_analysis = False
@@ -91,9 +97,6 @@ if uploaded:
 
     aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
 
-    # ----------------------
-    # ✅ Choix du mode
-    # ----------------------
     mode = st.radio(
         "Choisir le mode d'analyse",
         [
@@ -103,45 +106,50 @@ if uploaded:
     )
 
 
-    # ===============================================================
-    # ✅ MODE : DERNIÈRE TUILE DISPONIBLE
-    # ===============================================================
+    # =====================================================
+    # ✅ MODE 1 : DERNIÈRE TUILE DISPONIBLE
+    # =====================================================
     if mode == "Dernière tuile disponible":
 
         if st.button("▶️ Lancer l’analyse (dernière tuile ≤ 30 jours)"):
-            st.session_state.run_analysis = True
-            image, date_used = get_latest_s2_image(aoi)
 
-            if image is None:
-                st.error("❌ Aucune tuile trouvée dans les 30 derniers jours.")
+            img, d = get_latest_s2_image(aoi)
+
+            if img is None:
+                st.error("❌ Aucune tuile trouvée.")
                 st.stop()
 
+            st.session_state.image = img
+            st.session_state.date_used = d
+            st.session_state.run_analysis = True
 
-    # ===============================================================
-    # ✅ MODE : TUILE CHOISIE PARMI CELLES DISPONIBLES
-    # ===============================================================
+
+    # =====================================================
+    # ✅ MODE 2 : SÉLECTION DANS LES TUILES DISPONIBLES
+    # =====================================================
     else:
-
         if st.button("📅 Afficher les tuiles disponibles"):
-            st.info("Récupération des dates Sentinel‑2…")
+            st.info("Recherche des dates disponibles…")
             st.session_state.available_dates = get_available_s2_dates(aoi, max_days=120)
 
-        # afficher la liste si déjà récupérée
         if st.session_state.available_dates:
-
             st.session_state.selected_date = st.selectbox(
-                "Sélectionnez une date",
+                "Choisir une date",
                 st.session_state.available_dates,
                 format_func=lambda d: d.strftime("%Y-%m-%d")
             )
 
             if st.button("▶️ Lancer l’analyse avec cette tuile"):
-                st.session_state.run_analysis = True
-                image, date_used = get_closest_s2_image(aoi, st.session_state.selected_date)
+                img, d = get_closest_s2_image(aoi, st.session_state.selected_date)
 
-                if image is None:
+                if img is None:
                     st.error("❌ Aucune tuile trouvée autour de cette date.")
                     st.stop()
+
+                st.session_state.image = img
+                st.session_state.date_used = d
+                st.session_state.run_analysis = True
+
         else:
             st.stop()
 
@@ -152,11 +160,21 @@ if uploaded:
     if not st.session_state.run_analysis:
         st.stop()
 
+    # -----------------------------------------------------------
+    # ✅ STOP si image ou date manquante
+    # -----------------------------------------------------------
+    if st.session_state.image is None or st.session_state.date_used is None:
+        st.error("❌ Aucune tuile sélectionnée.")
+        st.stop()
+
+    st.success(f"✅ Tuile utilisée : {st.session_state.date_used}")
+
 
     # -----------------------------------------------------------
-    # ✅ Vérification & Calcul NDVI
+    # ✅ CALCUL NDVI
     # -----------------------------------------------------------
-    st.success(f"✅ Tuile utilisée : {date_used}")
+    image = st.session_state.image
+    date_used = st.session_state.date_used
 
     ndvi = compute_ndvi(image)
     veg_mask = compute_vegetation_mask(ndvi, threshold=0.25)
@@ -189,8 +207,9 @@ if uploaded:
     st.subheader("📋 Résultats NDVI par parcelle")
     st.dataframe(df)
 
+
     # -----------------------------------------------------------
-    # ✅ Carte NDVI
+    # ✅ CARTE
     # -----------------------------------------------------------
     st.subheader("🗺️ Carte NDVI — Classification Kermap")
 
@@ -212,15 +231,18 @@ if uploaded:
                 "fillOpacity": 0.7
             },
             tooltip=(
-                f"{df.iloc[i]['NUM_ILOT']} — NDVI={ndvi_val:.2f} — "
-                f"{df.iloc[i]['Classe']} — {df.iloc[i]['Couvert']}"
+                f"{df.iloc[i]['NUM_ILOT']} — "
+                f"NDVI={ndvi_val:.2f} — "
+                f"{df.iloc[i]['Classe']} — "
+                f"{df.iloc[i]['Couvert']}"
             )
         ).add_to(m)
 
     st_folium(m, height=600)
 
+
     # -----------------------------------------------------------
-    # ✅ Export CSV
+    # ✅ EXPORT CSV
     # -----------------------------------------------------------
     st.download_button(
         "📥 Télécharger CSV",
