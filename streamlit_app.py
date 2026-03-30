@@ -262,7 +262,6 @@ def tuile_selector(label, dates_key):
                 key=f"selm_{label}"
             )
             if st.button(f"▶️ Charger date ({
-Je termine le code immédiatement ✅
 
 ---
 
